@@ -1,0 +1,6 @@
+{
+  "name": "Objednávkový formulář QAPI",
+  "description": "Inteligentní SaaS aplikace pro sestavení, automatické vyplnění z nahraného PDF a validaci objednávek žaluzií podle technického katalogu QAPI.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
