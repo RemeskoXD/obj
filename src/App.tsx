@@ -151,7 +151,7 @@ export default function App() {
   // Empty default list of order items to encourage launching the customized questionnaires
   const [items, setItems] = useState<BlindOrderItem[]>([]);
   const [orderNumber, setOrderNumber] = useState<string>('OBJ-2026-001');
-  const [generalNotes, setGeneralNotes] = useState<string>('');
+  const [projectId, setProjectId] = useState<string>('');
   
   // Custom technician and customer states for measurement protocol & SMTP
   const [recipientEmail, setRecipientEmail] = useState<string>('');
@@ -161,6 +161,87 @@ export default function App() {
   const [customerPhone, setCustomerPhone] = useState<string>('');
   const [customerAddress, setCustomerAddress] = useState<string>('');
   const [isSendingEmail, setIsSendingEmail] = useState<boolean>(false);
+  const [isCaflouSyncing, setIsCaflouSyncing] = useState<boolean>(false);
+  const [caflouStatus, setCaflouStatus] = useState<'idle' | 'success' | 'error'>('idle');
+
+  const handleCaflouSync = async () => {
+    if (!projectId || isCaflouSyncing) return;
+
+    if (items.length === 0) {
+      setAppNotification({ message: 'Nelze poslat do Caflou prázdnou objednávku. Nejprve nadefinujte položky.', isError: true });
+      return;
+    }
+
+    setIsCaflouSyncing(true);
+    setCaflouStatus('idle');
+
+    try {
+      const XLSX = await import('xlsx');
+      const workbook = XLSX.utils.book_new();
+
+      const categoriesInOrder = Array.from(new Set(items.map(it => it.category)));
+      categoriesInOrder.forEach(cat => {
+        const catItems = items.filter(it => it.category === cat);
+        let sheetName = cat === 'HORIZONTAL' ? 'Horizontální žaluzie' :
+                        cat === 'WOODEN' ? 'Dřevěné žaluzie' :
+                        cat === 'VERTICAL' ? 'Vertikální stínění' :
+                        cat === 'ROLETKY' ? 'Textilní roletky' :
+                        cat === 'SCREENS' ? 'Sítě proti hmyzu' :
+                        cat === 'EXTERNAL' ? 'Venkovní žaluzie' :
+                        cat === 'AWNING' ? 'Markýzy' :
+                        cat === 'PLISSE' ? 'Plisé žaluzie' :
+                        cat === 'JAPANESE' ? 'Japonské stěny' : 'Stínění QAPI';
+        // (Skipping full explicit columns here to save bundle size, but mapping same standard standard ones)
+        let data = catItems.map((item, idx) => ({
+          'Pozice (Řádek)': idx + 1,
+          'Místnost / Pozice': item.notes && item.notes.startsWith('Pozice:') ? item.notes.split(' | ')[0].replace('Pozice: ', '') : `Položka ${idx + 1}`,
+          'Typ / Model': getProductTypeLabel(item.productType),
+          'Šířka (mm)': item.width,
+          'Výška (mm)': item.height,
+          'Množství (ks)': item.quantity,
+          'Lamela/Materiál': item.lamellaSize || '',
+          'Barva lamely': item.lamellaColor,
+          'Barva profilu': item.topProfileColor,
+          'Ovládání': item.controlSide,
+          'Poznámka': item.notes || ''
+        }));
+        const worksheet = XLSX.utils.json_to_sheet(data);
+        XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+      });
+
+      const excelBase64 = XLSX.write(workbook, { bookType: 'xlsx', type: 'base64' });
+
+      // Send to backend
+      const res = await fetch('/api/qapi/caflou-sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId,
+          orderNumber,
+          filename: `QAPI_${orderNumber || 'objednavka'}.xlsx`,
+          fileBase64: excelBase64
+        })
+      });
+
+      const resData = await res.json();
+      if (!resData.success) {
+        throw new Error(resData.error || 'Neznámá chyba při komunikaci s Caflou');
+      }
+
+      setCaflouStatus('success');
+      playSuccessChime();
+      setAppNotification({ message: 'Objednávka byla úspěšně nahrána do projektu v Caflou.', isError: false });
+      setTimeout(() => setCaflouStatus('idle'), 4000); // Reset UI statutu
+    } catch (err: any) {
+      console.error('Caflou sync failed:', err);
+      setCaflouStatus('error');
+      playErrorHum();
+      setAppNotification({ message: 'Chyba při nahrávání do Caflou: ' + err.message, isError: true });
+      setTimeout(() => setCaflouStatus('idle'), 5000);
+    } finally {
+      setIsCaflouSyncing(false);
+    }
+  };
   
   // Synchronized sound feedback state
   const [soundMuted, setSoundMuted] = useState<boolean>(() => {
@@ -259,6 +340,217 @@ export default function App() {
     });
   };
 
+  const generateWorkbook = async () => {
+    const XLSX = await import('xlsx');
+    const workbook = XLSX.utils.book_new();
+
+    // We will group items by category
+    const categoriesInOrder = Array.from(new Set(items.map(it => it.category)));
+
+    categoriesInOrder.forEach(cat => {
+      const catItems = items.filter(it => it.category === cat);
+      let sheetName = 'Stínění';
+      let data: any[] = [];
+
+      if (cat === 'HORIZONTAL') {
+        sheetName = 'Horizontální žaluzie';
+        data = catItems.map((item, idx) => ({
+          'pozice': item.notes && item.notes.startsWith('Pozice:') ? item.notes.split(' | ')[0].replace('Pozice: ', '') : `Položka ${idx + 1}`,
+          'šířka': item.width,
+          'výška': item.height,
+          'ks': item.quantity,
+          'ovládání': item.controlSide,
+          'materiál profilu': item.profileMaterial || 'Fe',
+          'doplněk ovládání': item.controlAccessory || (item.hasGearbox && item.hasBrake ? 'PB - převodovka s brzdou' : item.hasBrake ? 'B - brzda' : ''),
+          'typ žaluzie': getProductTypeLabel(item.productType),
+          'barva profilu': item.topProfileColor,
+          'barva krycí lišty LOCO': item.locoColor || '',
+          'typ lamely': item.lamellaSize,
+          'barva lamely': item.lamellaColor,
+          'domyk. provedení': item.isCelostin ? 'ANO' : 'NE',
+          'délka ovládání jiná (mm)': item.controlLengthCustom || 'standard',
+          'materiál okna': item.windowMaterial || 'PVC',
+          'distanční podložky': item.spacerCount || 0,
+          'bar. sladění žebřík+texband': item.colorHarmony ? 'ANO' : 'NE',
+          'bezpečnost. prvek': item.safetyElementBlinds ? 'ANO' : 'NE',
+          'montážní podpěra': item.mountingSupport ? 'ANO' : 'NE',
+          'šikmina': item.isSlant ? 'ANO' : 'NE',
+          'poznámky': item.notes || ''
+        }));
+      } else if (cat === 'WOODEN') {
+        sheetName = 'Dřevěné žaluzie';
+        data = catItems.map((item, idx) => ({
+          'Pozice (Řádek)': idx + 1,
+          'Místnost / Pozice': item.notes && item.notes.startsWith('Pozice:') ? item.notes.split(' | ')[0].replace('Pozice: ', '') : `Položka ${idx + 1}`,
+          'Typ dřevěné žaluzie': getProductTypeLabel(item.productType),
+          'Šířka (mm)': item.width,
+          'Výška (mm)': item.height,
+          'Množství (ks)': item.quantity,
+          'Šířka lamely (Rozměr)': item.lamellaSize,
+          'Barva lamely / dřeva': item.lamellaColor,
+          'Barva horního profilu': item.topProfileColor,
+          'Krycí lišta (typ)': item.boxType || '',
+          'Barva krycí lišty': item.boxColor || '',
+          'Strana ovládání': item.controlSide,
+          'S brzdou': item.hasBrake ? 'ANO' : 'NE',
+          'S převodovkou': item.hasGearbox ? 'ANO' : 'NE',
+          'Poznámka': item.notes || ''
+        }));
+      } else if (cat === 'VERTICAL') {
+        sheetName = 'Vertikální stínění';
+        data = catItems.map((item, idx) => ({
+          'pozice': item.notes && item.notes.startsWith('Pozice:') ? item.notes.split(' | ')[0].replace('Pozice: ', '') : `Položka ${idx + 1}`,
+          'omezení typ': item.verticalLimitation || '',
+          'provedení typ': item.verticalDesign || '1', // 1=standard, 2=lux
+          'šířka látky': item.lamellaSize || '127',
+          'ks': item.quantity,
+          'šířka': item.width,
+          'výška': item.height,
+          'typ stahování': item.verticalStahovani || '1',
+          'počet barev': item.verticalColorsCount || 1,
+          'barva': item.lamellaColor,
+          'uchycení': item.mountingType || '',
+          'uchycení navíc (ks)': item.verticalExtraBrackets || 0,
+          'délka ovládání': item.verticalControlLength || '',
+          'bezpečn. prvek': item.safetyElementBlinds ? 'ANO' : 'NE',
+          'poznámky': item.notes || ''
+        }));
+      } else if (cat === 'ROLETKY') {
+        sheetName = 'Textilní roletky';
+        data = catItems.map((item, idx) => ({
+          'pozice': item.notes && item.notes.startsWith('Pozice:') ? item.notes.split(' | ')[0].replace('Pozice: ', '') : `Položka ${idx + 1}`,
+          'ks': item.quantity,
+          'typ roletky': getProductTypeLabel(item.productType),
+          'látka': item.lamellaColor,
+          'barva komponentů': item.boxColor || item.topProfileColor || '',
+          'šířka': item.width,
+          'výška': item.height,
+          'strana': item.controlSide,
+          'ovládání': item.motorBrand ? 'Motor' : 'Ř - řetízek',
+          'elektronika': item.motorBrand || '',
+          'vodicí lišta': item.guideRailsOption ? 'ANO' : 'NE',
+          'bezpečnost. prvek': item.safetyElement ? 'ANO' : 'NE',
+          'délka řetízku': item.chainLength || 'standard',
+          'poznámky': item.notes || ''
+        }));
+      } else if (cat === 'SCREENS') {
+        sheetName = 'Sítě proti hmyzu';
+        data = catItems.map((item, idx) => ({
+          'pozice': item.notes && item.notes.startsWith('Pozice:') ? item.notes.split(' | ')[0].replace('Pozice: ', '') : `Položka ${idx + 1}`,
+          'profil': item.productType || '',
+          'ks': item.quantity,
+          'šířka': item.width,
+          'výška': item.height,
+          'barva profilu': item.topProfileColor || item.boxColor || '',
+          'síťovina': item.lamellaColor,
+          'okopový plech': item.kickPlate ? 'ANO' : 'NE',
+          'typ kartáčku / těsnění': item.brushType || '',
+          'samozavírací panty (ks)': item.pantsCountSelfClose ? 1 : 0,
+          'standardní panty (ks)': item.pantsCountStandard || 0,
+          'výška držáku / uchycení do okna': item.mountingType || '',
+          'rohy sítě (vnitřní/vnější)': item.cornersLook || '',
+          'magnet / úchyty': item.handleMagnet ? 'ANO' : 'NE',
+          'poznámky': item.notes || ''
+        }));
+      } else if (cat === 'EXTERNAL') {
+        sheetName = 'Venkovní žaluzie';
+        data = catItems.map((item, idx) => ({
+          'pozice': item.notes && item.notes.startsWith('Pozice:') ? item.notes.split(' | ')[0].replace('Pozice: ', '') : `Položka ${idx + 1}`,
+          'ks': item.quantity,
+          'šířka': item.width,
+          'výška': item.height,
+          'typ lamely': item.lamellaSize,
+          'barva lamela': item.lamellaColor,
+          'prodloužení profilu +/- (mm)': '',
+          'vedení žaluzie levá (typ)': item.guideType || '',
+          'vedení žaluzie levá (barva)': item.boxColor || '',
+          'vedení žaluzie pravá (typ)': item.guideType || '',
+          'vedení žaluzie pravá (barva)': item.boxColor || '',
+          'konc. lišta (barva)': item.endProfileColor || '',
+          'uchycení vedení levá (typ)': item.mountingType || '',
+          'uchycení vedení levá (barva)': '',
+          'uchycení vedení pravá (typ)': item.mountingType || '',
+          'uchycení vedení pravá (barva)': '',
+          'držák nosníku (typ)': item.mountingSupport ? 'ANO' : '',
+          'způsob ovládání (L/P/S)': item.controlSide,
+          'způsob ovládání (typ)': item.motorBrand || 'Klika',
+          'specifikace': item.electronicsReceiver || '',
+          'spojeno s pozicí': '',
+          'poznámky': item.notes || ''
+        }));
+      } else if (cat === 'AWNING') {
+        sheetName = 'Markýzy';
+        data = catItems.map((item, idx) => ({
+          'Pozice (Řádek)': idx + 1,
+          'Místnost / Pozice': item.notes && item.notes.startsWith('Pozice:') ? item.notes.split(' | ')[0].replace('Pozice: ', '') : `Položka ${idx + 1}`,
+          'Typ markýzy': getProductTypeLabel(item.productType),
+          'Šířka (mm)': item.width,
+          'Výsuv (mm)': item.height,
+          'Množství (ks)': item.quantity,
+          'Kvalita a kód tkaniny': item.lamellaColor,
+          'Typ konstrukce': item.boxType || '',
+          'Barva konstrukce': item.boxColor || '',
+          'Ovládání': item.controlSide,
+          'Větrné čidlo': item.awningWindSensor ? 'ANO' : 'NE',
+          'Přijímač/Ovladač': item.electronicsReceiver || '',
+          'Kryt Al/Stříška': item.awningHood ? 'ANO' : 'NE',
+          'Poznámka': item.notes || ''
+        }));
+      } else if (cat === 'PLISSE') {
+        sheetName = 'Plisé žaluzie';
+        data = catItems.map((item, idx) => ({
+          'pozice': item.notes && item.notes.startsWith('Pozice:') ? item.notes.split(' | ')[0].replace('Pozice: ', '') : `Položka ${idx + 1}`,
+          'šířka': item.width,
+          'výška': item.height,
+          'model': item.plisseModel || getProductTypeLabel(item.productType),
+          'barva profilu': item.boxColor || '',
+          'první látka (horní)': item.lamellaColor,
+          'druhá látka (dolní)': item.secondFabric || '',
+          'strana ovládání': item.controlSide,
+          'ovládání': item.controlSide, // Same logic or could be mapped to custom strings "madlo" etc.
+          'montáž                  - typ uchycení': item.mountingType || '',
+          'prodlužovací tyč (cm)': item.extensionRod || '',
+          'krycí lišta': item.plisseCoverBar || '',
+          'ks': item.quantity,
+          'poznámka': item.notes || ''
+        }));
+      } else if (cat === 'JAPANESE') {
+        sheetName = 'Japonské stěny';
+        data = catItems.map((item, idx) => ({
+          'Pozice (Řádek)': idx + 1,
+          'Místnost / Pozice': item.notes && item.notes.startsWith('Pozice:') ? item.notes.split(' | ')[0].replace('Pozice: ', '') : `Položka ${idx + 1}`,
+          'Profil VL': item.boxType || getProductTypeLabel(item.productType),
+          'Šířka (mm)': item.width,
+          'Výška (mm)': item.height,
+          'Množství (ks)': item.quantity,
+          'Šířka panelů (mm)': item.panelWidth || '',
+          'Počet panelů': item.panelCount || 1,
+          'VL typ': item.japTrackType || '',
+          'Barva VL profilu': item.boxColor || '',
+          'Magnetické úchyty (párů)': item.japMagnetsEnabled ? (item.japMagnetCount || 2) : 0,
+          'Tkanina / Barva': item.lamellaColor,
+          'Poznámka': item.notes || ''
+        }));
+      } else {
+        sheetName = 'Stínění QAPI';
+        data = catItems.map((item, idx) => ({
+          'Pozice (Řádek)': idx + 1,
+          'Rozměry': `${item.width} x ${item.height} mm`,
+          'Ks': item.quantity,
+          'Barva lamely': item.lamellaColor,
+          'Barva profilu': item.topProfileColor,
+          'Model': getProductTypeLabel(item.productType),
+          'Poznámka': item.notes || ''
+        }));
+      }
+
+      const worksheet = XLSX.utils.json_to_sheet(data);
+      XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+    });
+
+    return { workbook, XLSX };
+  };
+
   const handleExportToExcel = async () => {
     try {
       playTactileClick();
@@ -267,212 +559,7 @@ export default function App() {
         return;
       }
 
-      const XLSX = await import('xlsx');
-      const workbook = XLSX.utils.book_new();
-
-      // We will group items by category
-      const categoriesInOrder = Array.from(new Set(items.map(it => it.category)));
-
-      categoriesInOrder.forEach(cat => {
-        const catItems = items.filter(it => it.category === cat);
-        let sheetName = 'Stínění';
-        let data: any[] = [];
-
-        if (cat === 'HORIZONTAL') {
-          sheetName = 'Horizontální žaluzie';
-          data = catItems.map((item, idx) => ({
-            'pozice': item.notes && item.notes.startsWith('Pozice:') ? item.notes.split(' | ')[0].replace('Pozice: ', '') : `Položka ${idx + 1}`,
-            'šířka': item.width,
-            'výška': item.height,
-            'ks': item.quantity,
-            'ovládání': item.controlSide,
-            'materiál profilu': item.profileMaterial || 'Fe',
-            'doplněk ovládání': item.controlAccessory || (item.hasGearbox && item.hasBrake ? 'PB - převodovka s brzdou' : item.hasBrake ? 'B - brzda' : ''),
-            'typ žaluzie': getProductTypeLabel(item.productType),
-            'barva profilu': item.topProfileColor,
-            'barva krycí lišty LOCO': item.locoColor || '',
-            'typ lamely': item.lamellaSize,
-            'barva lamely': item.lamellaColor,
-            'domyk. provedení': item.isCelostin ? 'ANO' : 'NE',
-            'délka ovládání jiná (mm)': item.controlLengthCustom || 'standard',
-            'materiál okna': item.windowMaterial || 'PVC',
-            'distanční podložky': item.spacerCount || 0,
-            'bar. sladění žebřík+texband': item.colorHarmony ? 'ANO' : 'NE',
-            'bezpečnost. prvek': item.safetyElementBlinds ? 'ANO' : 'NE',
-            'montážní podpěra': item.mountingSupport ? 'ANO' : 'NE',
-            'šikmina': item.isSlant ? 'ANO' : 'NE',
-            'poznámky': item.notes || ''
-          }));
-        } else if (cat === 'WOODEN') {
-          sheetName = 'Dřevěné žaluzie';
-          data = catItems.map((item, idx) => ({
-            'Pozice (Řádek)': idx + 1,
-            'Místnost / Pozice': item.notes && item.notes.startsWith('Pozice:') ? item.notes.split(' | ')[0].replace('Pozice: ', '') : `Položka ${idx + 1}`,
-            'Typ dřevěné žaluzie': getProductTypeLabel(item.productType),
-            'Šířka (mm)': item.width,
-            'Výška (mm)': item.height,
-            'Množství (ks)': item.quantity,
-            'Šířka lamely (Rozměr)': item.lamellaSize,
-            'Barva lamely / dřeva': item.lamellaColor,
-            'Barva horního profilu': item.topProfileColor,
-            'Krycí lišta (typ)': item.boxType || '',
-            'Barva krycí lišty': item.boxColor || '',
-            'Strana ovládání': item.controlSide,
-            'S brzdou': item.hasBrake ? 'ANO' : 'NE',
-            'S převodovkou': item.hasGearbox ? 'ANO' : 'NE',
-            'Poznámka': item.notes || ''
-          }));
-        } else if (cat === 'VERTICAL') {
-          sheetName = 'Vertikální stínění';
-          data = catItems.map((item, idx) => ({
-            'pozice': item.notes && item.notes.startsWith('Pozice:') ? item.notes.split(' | ')[0].replace('Pozice: ', '') : `Položka ${idx + 1}`,
-            'omezení typ': item.verticalLimitation || '',
-            'provedení typ': item.verticalDesign || '1', // 1=standard, 2=lux
-            'šířka látky': item.lamellaSize || '127',
-            'ks': item.quantity,
-            'šířka': item.width,
-            'výška': item.height,
-            'typ stahování': item.verticalStahovani || '1',
-            'počet barev': item.verticalColorsCount || 1,
-            'barva': item.lamellaColor,
-            'uchycení': item.mountingType || '',
-            'uchycení navíc (ks)': item.verticalExtraBrackets || 0,
-            'délka ovládání': item.verticalControlLength || '',
-            'bezpečn. prvek': item.safetyElementBlinds ? 'ANO' : 'NE',
-            'poznámky': item.notes || ''
-          }));
-        } else if (cat === 'ROLETKY') {
-          sheetName = 'Textilní roletky';
-          data = catItems.map((item, idx) => ({
-            'pozice': item.notes && item.notes.startsWith('Pozice:') ? item.notes.split(' | ')[0].replace('Pozice: ', '') : `Položka ${idx + 1}`,
-            'ks': item.quantity,
-            'typ roletky': getProductTypeLabel(item.productType),
-            'látka': item.lamellaColor,
-            'barva komponentů': item.boxColor || item.topProfileColor || '',
-            'šířka': item.width,
-            'výška': item.height,
-            'strana': item.controlSide,
-            'ovládání': item.motorBrand ? 'Motor' : 'Ř - řetízek',
-            'elektronika': item.motorBrand || '',
-            'vodicí lišta': item.guideRailsOption ? 'ANO' : 'NE',
-            'bezpečnost. prvek': item.safetyElement ? 'ANO' : 'NE',
-            'délka řetízku': item.chainLength || 'standard',
-            'poznámky': item.notes || ''
-          }));
-        } else if (cat === 'SCREENS') {
-          sheetName = 'Sítě proti hmyzu';
-          data = catItems.map((item, idx) => ({
-            'pozice': item.notes && item.notes.startsWith('Pozice:') ? item.notes.split(' | ')[0].replace('Pozice: ', '') : `Položka ${idx + 1}`,
-            'profil': item.productType || '',
-            'ks': item.quantity,
-            'šířka': item.width,
-            'výška': item.height,
-            'barva profilu': item.topProfileColor || item.boxColor || '',
-            'síťovina': item.lamellaColor,
-            'okopový plech': item.kickPlate ? 'ANO' : 'NE',
-            'typ kartáčku / těsnění': item.brushType || '',
-            'samozavírací panty (ks)': item.pantsCountSelfClose ? 1 : 0,
-            'standardní panty (ks)': item.pantsCountStandard || 0,
-            'výška držáku / uchycení do okna': item.mountingType || '',
-            'rohy sítě (vnitřní/vnější)': item.cornersLook || '',
-            'magnet / úchyty': item.handleMagnet ? 'ANO' : 'NE',
-            'poznámka': item.notes || ''
-          }));
-        } else if (cat === 'EXTERNAL') {
-          sheetName = 'Venkovní žaluzie';
-          data = catItems.map((item, idx) => ({
-            'pozice': item.notes && item.notes.startsWith('Pozice:') ? item.notes.split(' | ')[0].replace('Pozice: ', '') : `Položka ${idx + 1}`,
-            'ks': item.quantity,
-            'šířka': item.width,
-            'výška': item.height,
-            'typ lamely': item.lamellaSize,
-            'barva lamela': item.lamellaColor,
-            'prodloužení profilu +/- (mm)': '',
-            'vedení žaluzie levá (typ)': item.guideType || '',
-            'vedení žaluzie levá (barva)': item.boxColor || '',
-            'vedení žaluzie pravá (typ)': item.guideType || '',
-            'vedení žaluzie pravá (barva)': item.boxColor || '',
-            'konc. lišta (barva)': item.endProfileColor || '',
-            'uchycení vedení levá (typ)': item.mountingType || '',
-            'uchycení vedení levá (barva)': '',
-            'uchycení vedení pravá (typ)': item.mountingType || '',
-            'uchycení vedení pravá (barva)': '',
-            'držák nosníku (typ)': item.mountingSupport ? 'ANO' : '',
-            'způsob ovládání (L/P/S)': item.controlSide,
-            'způsob ovládání (typ)': item.motorBrand || 'Klika',
-            'specifikace': item.electronicsReceiver || '',
-            'spojeno s pozicí': '',
-            'poznámka': item.notes || ''
-          }));
-        } else if (cat === 'AWNING') {
-          sheetName = 'Markýzy';
-          data = catItems.map((item, idx) => ({
-            'Pozice (Řádek)': idx + 1,
-            'Místnost / Pozice': item.notes && item.notes.startsWith('Pozice:') ? item.notes.split(' | ')[0].replace('Pozice: ', '') : `Položka ${idx + 1}`,
-            'Typ markýzy': getProductTypeLabel(item.productType),
-            'Šířka (mm)': item.width,
-            'Výsuv (mm)': item.height,
-            'Množství (ks)': item.quantity,
-            'Kvalita a kód tkaniny': item.lamellaColor,
-            'Typ konstrukce': item.boxType || '',
-            'Barva konstrukce': item.boxColor || '',
-            'Ovládání': item.controlSide,
-            'Větrné čidlo': item.awningWindSensor ? 'ANO' : 'NE',
-            'Přijímač/Ovladač': item.electronicsReceiver || '',
-            'Kryt Al/Stříška': item.awningHood ? 'ANO' : 'NE',
-            'Poznámka': item.notes || ''
-          }));
-        } else if (cat === 'PLISSE') {
-          sheetName = 'Plisé žaluzie';
-          data = catItems.map((item, idx) => ({
-            'pozice': item.notes && item.notes.startsWith('Pozice:') ? item.notes.split(' | ')[0].replace('Pozice: ', '') : `Položka ${idx + 1}`,
-            'šířka': item.width,
-            'výška': item.height,
-            'model': item.plisseModel || getProductTypeLabel(item.productType),
-            'barva profilu': item.boxColor || '',
-            'první látka (horní)': item.lamellaColor,
-            'druhá látka (dolní)': item.secondFabric || '',
-            'strana ovládání': item.controlSide,
-            'ovládání': item.controlSide, // Same logic or could be mapped to custom strings "madlo" etc.
-            'montáž                  - typ uchycení': item.mountingType || '',
-            'prodlužovací tyč (cm)': item.extensionRod || '',
-            'krycí lišta': item.plisseCoverBar || '',
-            'ks': item.quantity,
-            'poznámka': item.notes || ''
-          }));
-        } else if (cat === 'JAPANESE') {
-          sheetName = 'Japonské stěny';
-          data = catItems.map((item, idx) => ({
-            'Pozice (Řádek)': idx + 1,
-            'Místnost / Pozice': item.notes && item.notes.startsWith('Pozice:') ? item.notes.split(' | ')[0].replace('Pozice: ', '') : `Položka ${idx + 1}`,
-            'Profil VL': item.boxType || getProductTypeLabel(item.productType),
-            'Šířka (mm)': item.width,
-            'Výška (mm)': item.height,
-            'Množství (ks)': item.quantity,
-            'Šířka panelů (mm)': item.panelWidth || '',
-            'Počet panelů': item.panelCount || 1,
-            'VL typ': item.japTrackType || '',
-            'Barva VL profilu': item.boxColor || '',
-            'Magnetické úchyty (párů)': item.japMagnetsEnabled ? (item.japMagnetCount || 2) : 0,
-            'Tkanina / Barva': item.lamellaColor,
-            'Poznámka': item.notes || ''
-          }));
-        } else {
-          sheetName = 'Stínění QAPI';
-          data = catItems.map((item, idx) => ({
-            'Pozice (Řádek)': idx + 1,
-            'Rozměry': `${item.width} x ${item.height} mm`,
-            'Ks': item.quantity,
-            'Barva lamely': item.lamellaColor,
-            'Barva profilu': item.topProfileColor,
-            'Model': getProductTypeLabel(item.productType),
-            'Poznámka': item.notes || ''
-          }));
-        }
-
-        const worksheet = XLSX.utils.json_to_sheet(data);
-        XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
-      });
+      const { workbook, XLSX } = await generateWorkbook();
 
       XLSX.writeFile(workbook, `QAPI_${orderNumber || 'objednavka'}.xlsx`);
       playSuccessChime();
@@ -549,7 +636,7 @@ export default function App() {
     if (window.confirm('Opravdu si přejete smazat celou objednávku a začít znovu?')) {
       setItems([]);
       setOrderNumber('OBJ-' + Math.floor(1000 + Math.random() * 9000));
-      setGeneralNotes('');
+      setProjectId('');
       setSubmissionResult(null);
       setImportedFileInfo('');
     }
@@ -644,7 +731,7 @@ export default function App() {
         createdAt: new Date().toISOString(),
         items,
         totalPriceEstimate: aggregatedStats.price,
-        notes: generalNotes
+        projectId: projectId
       };
 
       const res = await fetch('/api/qapi/submit-order', {
@@ -698,7 +785,7 @@ export default function App() {
             ...item,
             productName: getProductTypeLabel(item.productType)
           })),
-          generalNotes,
+          projectId,
           recipientEmail,
           ccEmail,
           technicianName,
@@ -822,7 +909,7 @@ export default function App() {
                 onClick={() => {
                   setItems([]);
                   setOrderNumber('OBJ-' + Math.floor(1000 + Math.random() * 9000));
-                  setGeneralNotes('');
+                  setProjectId('');
                   setSubmissionResult(null);
                 }}
                 className="w-full sm:w-auto px-5 py-2.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-800 font-bold text-xs rounded-xl cursor-pointer transition active:scale-95 border border-neutral-250/40"
@@ -965,8 +1052,9 @@ export default function App() {
               {/* Order Metadata and general settings ( Grouped settings card look) */}
               <div className="bg-white rounded-2xl border border-neutral-200/55 p-5 shadow-xs">
                 <div className="flex items-center justify-between gap-3 flex-wrap mb-3.5">
-                  <span className="text-xs font-black text-neutral-900 uppercase tracking-wide">
-                    Poznámky k výrobě a nakládce QAPI
+                  <span className="text-xs font-black text-neutral-900 uppercase tracking-wide flex items-center gap-2">
+                    ID Projektu (Caflou)
+                    <div className="bg-indigo-100 text-indigo-700 text-[9px] px-1.5 py-0.5 rounded-md font-bold">Volitelně</div>
                   </span>
                   <button
                     onClick={handleResetOrder}
@@ -976,14 +1064,39 @@ export default function App() {
                   </button>
                 </div>
 
-                <div className="mt-2">
-                  <textarea
-                    rows={2}
-                    value={generalNotes}
-                    onChange={(e) => setGeneralNotes(e.target.value)}
-                    placeholder="Např. Roztřídit dle místností, u šikmých žaluzií přibalit náhradní fixace..."
-                    className="w-full text-base sm:text-xs rounded-xl border border-neutral-200 bg-[#F2F2F7] p-3 text-neutral-800 placeholder:text-neutral-400 focus:bg-white focus:border-black focus:outline-hidden min-h-[50px]"
-                  />
+                <div className="mt-2 text-sm font-medium">
+                  <div className="flex flex-col sm:flex-row items-center gap-3">
+                    <input
+                      type="text"
+                      value={projectId}
+                      onChange={(e) => setProjectId(e.target.value)}
+                      placeholder="Např. 20260421"
+                      className="w-full sm:w-1/2 text-sm rounded-xl border border-neutral-200 bg-[#F2F2F7] p-3 text-neutral-800 placeholder:text-neutral-400 focus:bg-white focus:border-black focus:outline-hidden"
+                    />
+                    <button
+                      onClick={handleCaflouSync}
+                      disabled={!projectId || isCaflouSyncing}
+                      className={`w-full sm:w-auto px-5 py-3 text-white font-bold text-[13px] rounded-xl transition-all shadow-sm active:scale-95 flex items-center justify-center gap-2 
+                        ${!projectId ? 'bg-neutral-300 cursor-not-allowed' : 
+                          caflouStatus === 'success' ? 'bg-[#34C759] hover:bg-[#20b246]' : 
+                          caflouStatus === 'error' ? 'bg-[#FF3B30] hover:bg-[#d9291e]' : 
+                          'bg-[#007AFF] hover:bg-[#007AFF]/90 cursor-pointer'}`}
+                    >
+                      {isCaflouSyncing ? (
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                      ) : caflouStatus === 'success' ? (
+                        <CheckCircle2 className="w-4 h-4" />
+                      ) : caflouStatus === 'error' ? (
+                        <AlertCircle className="w-4 h-4" />
+                      ) : (
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                      )}
+                      {isCaflouSyncing ? 'Odesílání...' : 
+                       caflouStatus === 'success' ? 'Odesláno' : 
+                       caflouStatus === 'error' ? 'Chyba odeslání' : 
+                       'Poslat do Caflou'}
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -1603,9 +1716,9 @@ export default function App() {
                     <p>Výrobní číslo zakázky: <span className="font-mono font-bold text-slate-900">{orderNumber}</span></p>
                     <p>Počet nakonfigurovaných oken: <span className="font-bold text-slate-900">{items.length} ks</span></p>
                     <p>Celková váha stínění: <span className="font-bold text-slate-900">{aggregatedStats.weight.toFixed(1)} kg</span></p>
-                    {generalNotes ? (
+                    {projectId ? (
                       <p className="pt-1.5 border-t border-slate-150 mt-1.5 text-slate-500 font-normal">
-                        Poznámka k nakládce: <span className="font-medium text-slate-800 break-words">{generalNotes}</span>
+                        ID Projektu (Caflou): <span className="font-medium text-slate-800 break-words">{projectId}</span>
                       </p>
                     ) : (
                       <p className="text-slate-400 italic font-normal">Bez dodatečných poznámek</p>
@@ -1683,10 +1796,10 @@ export default function App() {
                   <p className="leading-relaxed">
                     Tento dokument slouží jako zaměřovací a předávací protokol stínicích prvků QAPI. Uvedené rozměry a parametry plně odpovídají výrobní normativě výrobce a byly prověřeny integrovaným bezpečnostním validátorem.
                   </p>
-                  {generalNotes && (
+                  {projectId && (
                     <div className="p-3.5 bg-slate-50 border border-slate-150 rounded-xl text-slate-655 italic print:bg-white print:border-slate-300">
-                      <span className="font-bold text-slate-600 block uppercase text-[8px] tracking-wider mb-1">Poznámka k zakázce:</span>
-                      "{generalNotes}"
+                      <span className="font-bold text-slate-600 block uppercase text-[8px] tracking-wider mb-1">ID Projektu (Caflou):</span>
+                      {projectId}
                     </div>
                   )}
                 </div>

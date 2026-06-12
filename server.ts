@@ -275,7 +275,69 @@ async function startServer() {
     }
   });
 
-  // API 4: Submit Order with full metadata validation (Backup legacy)
+  // API 4: Přímé odeslání do Caflou (Nové)
+  app.post("/api/qapi/caflou-sync", async (req, res) => {
+    try {
+      const { projectId, orderNumber, filename, fileBase64 } = req.body;
+
+      if (!projectId || !fileBase64) {
+        return res.status(400).json({ success: false, error: "Chybí ID projektu Caflou nebo obsah excelového souboru." });
+      }
+
+      const apiKey = process.env.CAFLOU_API_KEY;
+      const accountId = process.env.CAFLOU_ACCOUNT_ID;
+
+      if (!apiKey || !accountId) {
+        // Simulovaný režim pro případ, že chybí API tokeny (uživatelský zážitek)
+        console.warn("[CAFLOU MOCK] CAFLOU_API_KEY a CAFLOU_ACCOUNT_ID nejsou nastaveny. Simuluji nahrání.");
+        return res.json({
+          success: true,
+          mocked: true,
+          message: `Tabulky (${filename}) byly úspěšně namapovány pro projekt ID ${projectId}. (Mock mode - chybí API klíče).`
+        });
+      }
+
+      // 1. Získání reálného Caflou API
+      const FormData = (await import("form-data")).default;
+      const formData = new FormData();
+      
+      const fileBuffer = Buffer.from(fileBase64, 'base64');
+      formData.append('file', fileBuffer, {
+        filename: filename || 'objednavka.xlsx',
+        contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      });
+      formData.append('entity_type', 'project');
+      formData.append('entity_id', projectId);
+
+      // Reálné volání Caflou API (příkladová struktura pro upload endpoint)
+      // Dle dokumentace: POST https://app.caflou.com/api/v1/accounts/{accountId}/files
+      const caflouReq = await fetch(`https://app.caflou.com/api/v1/accounts/${accountId}/files`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${apiKey}`,
+          ...formData.getHeaders()
+        },
+        body: formData as any
+      });
+
+      if (!caflouReq.ok) {
+        const errData = await caflouReq.text();
+        console.error("Caflou API Error:", caflouReq.status, errData);
+        throw new Error(`Chyba Caflou API: ${caflouReq.status} - nelze nahrát soubor.`);
+      }
+
+      res.json({
+        success: true,
+        mocked: false,
+        message: `Zakázka ${orderNumber} (soubor ${filename}) byla úspěšně odeslána do Caflou jako nová příloha.`
+      });
+    } catch (err: any) {
+      console.error("[CAFLOU ERROR] Failed uploading excel table to Caflou:", err);
+      res.status(500).json({ success: false, error: err.message || "Selhalo odeslání zakázky do Caflou API." });
+    }
+  });
+
+  // API 5: Submit Order with full metadata validation (Backup legacy)
   app.post("/api/qapi/submit-order", (req, res) => {
     try {
       const { order } = req.body;

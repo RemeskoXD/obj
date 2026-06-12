@@ -1,5 +1,6 @@
 import React from 'react';
 import { Copy, Trash2, AlertCircle, Plus, Upload, Edit3 } from 'lucide-react';
+import GridCombobox from './GridCombobox';
 import { BlindOrderItem, ProductCategory, ProductType } from '../types';
 
 function getBoxTypeOptions(category: ProductCategory): string[] {
@@ -392,7 +393,7 @@ export default function ExcelGridEditor({
             <thead>
               <tr className="bg-[#F2F2F7] text-[12px] font-semibold text-[#1C1C1E] select-none">
                 <th className="py-2.5 px-3 text-center min-w-[50px] max-w-[50px] sticky left-0 z-20 bg-[#F2F2F7] border border-[#D1D1D6]">P.</th>
-                <th className="py-2.5 px-3 min-w-[190px] sticky left-[50px] z-20 bg-[#F2F2F7] border border-[#D1D1D6]">Místnost (Pozice)</th>
+                <th className="py-2.5 px-3 min-w-[190px] md:sticky md:left-[50px] z-20 bg-[#F2F2F7] border border-[#D1D1D6]">Místnost (Pozice)</th>
                 <th className="py-2.5 px-3 min-w-[195px] border border-[#D1D1D6]">Kategorie stínění</th>
                 <th className="py-2.5 px-3 min-w-[240px] border border-[#D1D1D6]">Produktový typ stínění</th>
                 <th className="py-2.5 px-3 min-w-[105px] text-center border border-[#D1D1D6]">Šířka (mm)</th>
@@ -470,7 +471,7 @@ export default function ExcelGridEditor({
                       </td>
 
                       {/* Position room input */}
-                      <td className="p-0 sticky left-[50px] z-10 bg-white border border-[#E5E5EA] shadow-[1px_0_0_0_#E5E5EA] min-w-[190px]">
+                      <td className="p-0 md:sticky md:left-[50px] md:z-10 bg-white border border-[#E5E5EA] shadow-[1px_0_0_0_#E5E5EA] min-w-[190px]">
                         <input
                           type="text"
                           placeholder="Kuchyň ok. 1"
@@ -572,19 +573,13 @@ export default function ExcelGridEditor({
 
                       {/* Lamella/Fabric Color */}
                       <td className="p-0 border border-[#E5E5EA]">
-                        <input
-                          type="text"
-                          list={`lamella-color-list-${idx}`}
+                        <GridCombobox
                           placeholder={getLamellaColorPlaceholder(item.category)}
-                          value={item.lamellaColor}
-                          onChange={(e) => handleCellChange(idx, 'lamellaColor', e.target.value)}
+                          value={item.lamellaColor || ''}
+                          onChange={(val) => handleCellChange(idx, 'lamellaColor', val)}
+                          options={getLamellaColorOptions(item.category)}
                           className="w-full h-[38px] px-3 bg-transparent hover:bg-[#F2F2F7]/50 focus:bg-[#FFF] text-[13px] font-medium text-black focus:ring-1.5 focus:ring-[#007AFF] focus:ring-inset border-0 outline-none transition-all"
                         />
-                        <datalist id={`lamella-color-list-${idx}`}>
-                          {getLamellaColorOptions(item.category).map(opt => (
-                            <option key={opt} value={opt} />
-                          ))}
-                        </datalist>
                       </td>
 
                       {/* Top Profile color text */}
@@ -610,103 +605,65 @@ export default function ExcelGridEditor({
 
                       {/* Typ Boxu / Látky */}
                       <td className="p-0 border border-[#E5E5EA]">
-                        <input
-                          type="text"
-                          list={`box-type-list-${idx}`}
+                        <GridCombobox
                           placeholder={getBoxTypePlaceholder(item.category)}
                           value={item.boxType || item.fabricType || item.screenType || item.plisseModel || ''}
-                          onChange={(e) => {
-                            const val = e.target.value;
+                          onChange={(val) => {
                             if (item.category === 'SCREENS') handleCellChange(idx, 'screenType', val);
                             else if (item.category === 'PLISSE') handleCellChange(idx, 'plisseModel', val);
                             else handleCellChange(idx, 'boxType', val);
                           }}
+                          options={getBoxTypeOptions(item.category)}
                           className="w-full h-[38px] px-3 bg-transparent hover:bg-[#F2F2F7]/50 focus:bg-[#FFF] text-[13px] font-medium text-black focus:ring-1.5 focus:ring-[#007AFF] focus:ring-inset border-0 outline-none transition-all"
                         />
-                        <datalist id={`box-type-list-${idx}`}>
-                          {getBoxTypeOptions(item.category).map(opt => (
-                            <option key={opt} value={opt} />
-                          ))}
-                        </datalist>
                       </td>
 
                       {/* Barva Boxu / AL */}
                       <td className="p-0 border border-[#E5E5EA]">
-                        <input
-                          type="text"
-                          list={`box-color-list-${idx}`}
+                        <GridCombobox
                           placeholder={getBoxColorPlaceholder(item.category)}
                           value={item.boxColor || item.bracketColor || item.meshColor || ''}
-                          onChange={(e) => {
-                            const val = e.target.value;
+                          onChange={(val) => {
                             if (item.category === 'SCREENS') handleCellChange(idx, 'meshColor', val);
                             else if (item.category === 'ROLETKY') handleCellChange(idx, 'bracketColor', val);
                             else handleCellChange(idx, 'boxColor', val);
                           }}
+                          options={getBoxColorOptions()}
                           className="w-full h-[38px] px-3 bg-transparent hover:bg-[#F2F2F7]/50 focus:bg-[#FFF] text-[13px] font-medium text-black focus:ring-1.5 focus:ring-[#007AFF] focus:ring-inset border-0 outline-none transition-all"
                         />
-                        <datalist id={`box-color-list-${idx}`}>
-                          {getBoxColorOptions().map(opt => (
-                            <option key={opt} value={opt} />
-                          ))}
-                        </datalist>
                       </td>
 
                       {/* Způsob Vedení */}
                       <td className="p-0 border border-[#E5E5EA]">
-                        <input
-                          type="text"
-                          list={`guide-type-list-${idx}`}
+                        <GridCombobox
                           placeholder="Vyberte boční vedení"
                           value={item.guideType || item.guideRailsWidth || ''}
-                          onChange={(e) => {
-                            handleCellChange(idx, 'guideType', e.target.value);
-                          }}
+                          onChange={(val) => handleCellChange(idx, 'guideType', val)}
+                          options={getGuideTypeOptions(item.category)}
                           className="w-full h-[38px] px-3 bg-transparent hover:bg-[#F2F2F7]/50 focus:bg-[#FFF] text-[13px] font-medium text-black focus:ring-1.5 focus:ring-[#007AFF] focus:ring-inset border-0 outline-none transition-all"
                         />
-                        <datalist id={`guide-type-list-${idx}`}>
-                          {getGuideTypeOptions(item.category).map(opt => (
-                            <option key={opt} value={opt} />
-                          ))}
-                        </datalist>
                       </td>
 
                       {/* Kotvení / Uchycení */}
                       <td className="p-0 border border-[#E5E5EA]">
-                        <input
-                          type="text"
-                          list={`mounting-type-list-${idx}`}
+                        <GridCombobox
                           placeholder="Vyberte způsob kotvení"
                           value={item.mountingTypeCustom || item.mountingType || item.mountingOpus || ''}
-                          onChange={(e) => {
-                            handleCellChange(idx, 'mountingTypeCustom', e.target.value);
-                          }}
+                          onChange={(val) => handleCellChange(idx, 'mountingTypeCustom', val)}
+                          options={getMountingTypeOptions(item.category)}
                           className="w-full h-[38px] px-3 bg-transparent hover:bg-[#F2F2F7]/50 focus:bg-[#FFF] text-[13px] font-medium text-black focus:ring-1.5 focus:ring-[#007AFF] focus:ring-inset border-0 outline-none transition-all"
                         />
-                        <datalist id={`mounting-type-list-${idx}`}>
-                          {getMountingTypeOptions(item.category).map(opt => (
-                            <option key={opt} value={opt} />
-                          ))}
-                        </datalist>
                       </td>
 
                       {/* Pohon / Motor */}
                       <td className="p-0 border border-[#E5E5EA]">
-                        <input
-                          type="text"
-                          list={`motor-options-list-${idx}`}
+                        <GridCombobox
                           placeholder="Vyberte motor / pohon"
                           value={item.electronicsReceiver || item.motorBrand || item.electronicsApp || ''}
-                          onChange={(e) => {
-                            handleCellChange(idx, 'electronicsReceiver', e.target.value);
-                          }}
+                          onChange={(val) => handleCellChange(idx, 'electronicsReceiver', val)}
+                          options={getMotorOptions()}
                           className="w-full h-[38px] px-3 bg-transparent hover:bg-[#F2F2F7]/50 focus:bg-[#FFF] text-[13px] font-medium text-black focus:ring-1.5 focus:ring-[#007AFF] focus:ring-inset border-0 outline-none transition-all"
                         />
-                        <datalist id={`motor-options-list-${idx}`}>
-                          {getMotorOptions().map(opt => (
-                            <option key={opt} value={opt} />
-                          ))}
-                        </datalist>
                       </td>
 
                       {/* ControlSide select */}
