@@ -30,19 +30,122 @@ import {
   Check,
   Printer
 } from 'lucide-react';
-import { BlindOrderItem, ValidationAlert } from './types';
+import { BlindOrderItem, ValidationAlert, ProductCategory, ProductType } from './types';
 import {
   validateBlindItem,
   calculateItemPrice,
   calculateItemWeight,
   getProductTypeLabel
 } from './constants';
-import BlindSpecsInfo from './components/BlindSpecsInfo';
 import OrderStepWizard from './components/OrderStepWizard';
+import ExcelGridEditor from './components/ExcelGridEditor';
 import { playTactileClick, playSuccessChime, playErrorHum } from './utils/sound';
 
 // Helper to generate unique IDs
 const generateId = () => 'item_' + Math.random().toString(36).substring(2, 9);
+
+// Mapping defined categories and products
+const PRODUCT_TYPES_BY_CATEGORY: Record<string, string[]> = {
+  HORIZONTAL: ['ISOLINE', 'ISOLINE_LOCO', 'ISOLINE_PRIM', 'ISOLINE_ECO', 'HZ_25_19', 'HZ_27_19'],
+  WOODEN: ['WOOD_25', 'WOOD_35', 'WOOD_50'],
+  VERTICAL: ['VERT_STOFF_89', 'VERT_STOFF_127', 'VERT_PVC'],
+  ROLETKY: ['ROLL_OPTIMA', 'ROLL_ROLOLITE'],
+  SCREENS: ['SCREEN_FIX_W', 'SCREEN_DOOR_OPEN', 'SCREEN_DOOR_SLIDE', 'SCREEN_DOOR_PLEAT', 'SCREEN_SLIDE_TRACKS', 'SCREEN_SLIDE_FRAME', 'SCREEN_SLANT', 'SCREEN_ROLLER_VERSA', 'SCREEN_ROLLER_DAROS'],
+  EXTERNAL: ['EXT_Z90', 'EXT_S90', 'EXT_C80', 'EXT_F80', 'EXT_TARA_PREMIO_I', 'EXT_TARA_PREMIO_II', 'EXT_GHIBLI_UNION', 'EXT_ROLO_VENKOVNI', 'EXT_ROLO_HELUZ'],
+  AWNING: ['AWN_CASABLANCA', 'AWN_DAKOTA', 'AWN_ITALIA', 'AWN_UNION_DROP'],
+  PLISSE: ['PLISSE_DARNI', 'PLISSE_LAGARTA'],
+  JAPANESE: ['JAP_STENA']
+};
+
+const CATEGORIES_LIST = [
+  { value: 'HORIZONTAL', label: 'Horizontální', icon: '🪟' },
+  { value: 'WOODEN', label: 'Dřevěné', icon: '🪵' },
+  { value: 'PLISSE', label: 'Plisé žaluzie', icon: '🎋' },
+  { value: 'VERTICAL', label: 'Vertikální', icon: '↔️' },
+  { value: 'JAPANESE', label: 'Japonská stěna', icon: '⛩️' },
+  { value: 'ROLETKY', label: 'Roletky', icon: '📜' },
+  { value: 'SCREENS', label: 'Sítě / Dveře', icon: '🛡️' },
+  { value: 'EXTERNAL', label: 'Venkovní', icon: '🏢' },
+  { value: 'AWNING', label: 'Markýzy', icon: '⛺' }
+];
+
+const OFFLINE_TEMPLATES = [
+  { file: '01_formular_horizontalni_zaluzie.xls', label: 'Horizontální žaluzie (Vzor)' },
+  { file: '01_formular_horizontalni_zaluzie_Isoline_Loco_Prim_Eco.xls', label: 'Isoline/Loco/Prim/Eco' },
+  { file: '02_formular_plise_zaluzie_Darni.xls', label: 'Plisé žaluzie DARNI' },
+  { file: '02_formular_plise_zaluzie_Lagarta.xls', label: 'Plisé žaluzie LAGARTA' },
+  { file: '03_formular_drevene_zaluzie.xls', label: 'Dřevěné žaluzie' },
+  { file: '04_formular_vertikalni_zaluzie.xls', label: 'Vertikální stínění' },
+  { file: '05_formular_textilni_roletky_Jazz.xls', label: 'Textilní roletky' },
+  { file: '06_formular_japonska_stena.xls', label: 'Japonská stěna' },
+  { file: '07_formular_pevne_site_proti_hmyzu_okenni.xls', label: 'Pevné sítě proti hmyzu' },
+  { file: '09_formular_venkovni_zaluzie.xlsx', label: 'Venkovní žaluzie' }
+];
+
+const LAMELLA_OPTIONS_BY_CATEGORY: Record<string, string[]> = {
+  HORIZONTAL: ['25x0.18', '25x0.21', '16x0.21'],
+  WOODEN: ['25 mm', '35 mm', '50 mm'],
+  PLISSE: ['Plisé látka 20 mm'],
+  VERTICAL: ['Látka 89 mm', 'Látka 127 mm', 'PVC 89 mm'],
+  JAPANESE: ['Panel standard', 'Panel Premium'],
+  ROLETKY: ['Standard', 'Premium', 'Zatemňující'],
+  SCREENS: ['Šedá sklovlákno', 'Černá sklovlákno', 'Protipylová', 'Plisovaná černá'],
+  EXTERNAL: ['Z90 - zpevněná', 'S90 - oblá', 'C80 - záhyb', 'F80 - plochá'],
+  AWNING: ['Tkanina Terasa Standard', 'Soltis screen', 'Akrylová Premium']
+};
+
+const CONTROL_OPTIONS_BY_CATEGORY: Record<string, { value: string; label: string }[]> = {
+  HORIZONTAL: [
+    { value: 'RP', label: 'RP (Pravo)' },
+    { value: 'RL', label: 'RL (Vlevo)' },
+    { value: 'M', label: 'M (Meziskelní tyčka)' },
+    { value: 'MF', label: 'MF (Meziskelní s fix)' },
+    { value: 'IB', label: 'IB (Brzda a šnek)' }
+  ],
+  WOODEN: [
+    { value: 'RP', label: 'Pravé (P)' },
+    { value: 'RL', label: 'Levé (L)' }
+  ],
+  PLISSE: [
+    { value: 'madlo', label: 'Ovládací madlo' },
+    { value: 'provazek_L', label: 'Provázek vlevo (L)' },
+    { value: 'provazek_P', label: 'Provázek vpravo (P)' }
+  ],
+  VERTICAL: [
+    { value: '1', label: '1 - stahování k ovladači' },
+    { value: '2', label: '2 - stahování od ovladače' },
+    { value: '3', label: '3 - stahování od středu (opona)' },
+    { value: '4', label: '4 - stahování do středu' },
+    { value: '5', label: '5 - oboustranné ovládání' },
+    { value: '8/1', label: '8/1 - dvoje k ovladači' },
+    { value: '8/2', label: '8/2 - dvoje od ovladače' },
+    { value: '8/3', label: '8/3 - dvoje od středu' },
+    { value: '8/4', label: '8/4 - dvoje do středu' }
+  ],
+  JAPANESE: [
+    { value: 'snura', label: 'Šňůra s těžítkem' },
+    { value: 'tahlo', label: 'Průhledné táhlo' },
+    { value: 'rucni', label: 'Volně ruční posun' }
+  ],
+  ROLETKY: [
+    { value: 'RP', label: 'Řetízek vpravo' },
+    { value: 'RL', label: 'Řetízek vlevo' }
+  ],
+  SCREENS: [
+    { value: 'RP', label: 'Není určeno' }
+  ],
+  EXTERNAL: [
+    { value: 'RP', label: 'Klika vpravo' },
+    { value: 'RL', label: 'Klika vlevo' },
+    { value: 'MOTOR_IO', label: 'Somfy IO dálkový' },
+    { value: 'MOTOR_SWITCH', label: 'Motor na vypínač' }
+  ],
+  AWNING: [
+    { value: 'RP', label: 'Klika vpravo' },
+    { value: 'RL', label: 'Klika vlevo' },
+    { value: 'MOTOR_IO', label: 'Somfy IO motor' }
+  ]
+};
 
 export default function App() {
   // Empty default list of order items to encourage launching the customized questionnaires
@@ -79,7 +182,6 @@ export default function App() {
   };
 
   // Layout & Wizard States
-  const [currentTab, setCurrentTab] = useState<'form' | 'specs'>('form');
   const [isPrintOverlayOpen, setIsPrintOverlayOpen] = useState<boolean>(false);
   const [vatRate, setVatRate] = useState<number>(21); // default 21%
   const [orderDiscount, setOrderDiscount] = useState<number>(0); // discount percent
@@ -105,6 +207,282 @@ export default function App() {
   
   // Confirmed item state to trigger post-questionnaire branch overlay
   const [justSavedItem, setJustSavedItem] = useState<BlindOrderItem | null>(null);
+
+  // Synchronized view layout (Cards vs Grid)
+  const [viewMode, setViewMode] = useState<'cards' | 'grid'>('grid'); // Default to grid for high productivity order sheets!
+
+  const handleGridAddRow = () => {
+    playTactileClick();
+    const nextId = 'item_grid_' + Math.random().toString(36).substring(2, 9);
+    const newItem: BlindOrderItem = {
+      id: nextId,
+      category: 'HORIZONTAL',
+      productType: 'ISOLINE',
+      width: 1000,
+      height: 1000,
+      quantity: 1,
+      lamellaSize: '25x0.18',
+      lamellaColor: '9010',
+      topProfileColor: '9010',
+      bottomProfileColor: '9010',
+      controlSide: 'RP',
+      isCelostin: false,
+      isSlant: false,
+      hasBrake: false,
+      hasGearbox: false,
+      notes: ''
+    };
+    setItems(prev => [...prev, newItem]);
+  };
+
+  const handleGridCellChange = (index: number, field: keyof BlindOrderItem, value: any) => {
+    setItems(prev => {
+      const next = [...prev];
+      next[index] = { ...next[index], [field]: value };
+      return next;
+    });
+  };
+
+  const handleGridCategoryChange = (index: number, newCat: ProductCategory) => {
+    const list = PRODUCT_TYPES_BY_CATEGORY[newCat] || PRODUCT_TYPES_BY_CATEGORY.HORIZONTAL;
+    const defaultProduct = list[0] as ProductType;
+    setItems(prev => {
+      const next = [...prev];
+      next[index] = {
+        ...next[index],
+        category: newCat,
+        productType: defaultProduct,
+        lamellaSize: newCat === 'HORIZONTAL' ? '25x0.18' : newCat === 'WOODEN' ? 'WOOD_25' : 'Standard',
+        controlSide: 'RP'
+      };
+      return next;
+    });
+  };
+
+  const handleExportToExcel = async () => {
+    try {
+      playTactileClick();
+      if (items.length === 0) {
+        setAppNotification({ message: 'Nelze exportovat prázdnou objednávku. Nejprve nadefinujte nebo importujte položky.', isError: true });
+        return;
+      }
+
+      const XLSX = await import('xlsx');
+      const workbook = XLSX.utils.book_new();
+
+      // We will group items by category
+      const categoriesInOrder = Array.from(new Set(items.map(it => it.category)));
+
+      categoriesInOrder.forEach(cat => {
+        const catItems = items.filter(it => it.category === cat);
+        let sheetName = 'Stínění';
+        let data: any[] = [];
+
+        if (cat === 'HORIZONTAL') {
+          sheetName = 'Horizontální žaluzie';
+          data = catItems.map((item, idx) => ({
+            'pozice': item.notes && item.notes.startsWith('Pozice:') ? item.notes.split(' | ')[0].replace('Pozice: ', '') : `Položka ${idx + 1}`,
+            'šířka': item.width,
+            'výška': item.height,
+            'ks': item.quantity,
+            'ovládání': item.controlSide,
+            'materiál profilu': item.profileMaterial || 'Fe',
+            'doplněk ovládání': item.controlAccessory || (item.hasGearbox && item.hasBrake ? 'PB - převodovka s brzdou' : item.hasBrake ? 'B - brzda' : ''),
+            'typ žaluzie': getProductTypeLabel(item.productType),
+            'barva profilu': item.topProfileColor,
+            'barva krycí lišty LOCO': item.locoColor || '',
+            'typ lamely': item.lamellaSize,
+            'barva lamely': item.lamellaColor,
+            'domyk. provedení': item.isCelostin ? 'ANO' : 'NE',
+            'délka ovládání jiná (mm)': item.controlLengthCustom || 'standard',
+            'materiál okna': item.windowMaterial || 'PVC',
+            'distanční podložky': item.spacerCount || 0,
+            'bar. sladění žebřík+texband': item.colorHarmony ? 'ANO' : 'NE',
+            'bezpečnost. prvek': item.safetyElementBlinds ? 'ANO' : 'NE',
+            'montážní podpěra': item.mountingSupport ? 'ANO' : 'NE',
+            'šikmina': item.isSlant ? 'ANO' : 'NE',
+            'poznámky': item.notes || ''
+          }));
+        } else if (cat === 'WOODEN') {
+          sheetName = 'Dřevěné žaluzie';
+          data = catItems.map((item, idx) => ({
+            'Pozice (Řádek)': idx + 1,
+            'Místnost / Pozice': item.notes && item.notes.startsWith('Pozice:') ? item.notes.split(' | ')[0].replace('Pozice: ', '') : `Položka ${idx + 1}`,
+            'Typ dřevěné žaluzie': getProductTypeLabel(item.productType),
+            'Šířka (mm)': item.width,
+            'Výška (mm)': item.height,
+            'Množství (ks)': item.quantity,
+            'Šířka lamely (Rozměr)': item.lamellaSize,
+            'Barva lamely / dřeva': item.lamellaColor,
+            'Barva horního profilu': item.topProfileColor,
+            'Krycí lišta (typ)': item.boxType || '',
+            'Barva krycí lišty': item.boxColor || '',
+            'Strana ovládání': item.controlSide,
+            'S brzdou': item.hasBrake ? 'ANO' : 'NE',
+            'S převodovkou': item.hasGearbox ? 'ANO' : 'NE',
+            'Poznámka': item.notes || ''
+          }));
+        } else if (cat === 'VERTICAL') {
+          sheetName = 'Vertikální stínění';
+          data = catItems.map((item, idx) => ({
+            'pozice': item.notes && item.notes.startsWith('Pozice:') ? item.notes.split(' | ')[0].replace('Pozice: ', '') : `Položka ${idx + 1}`,
+            'omezení typ': item.verticalLimitation || '',
+            'provedení typ': item.verticalDesign || '1', // 1=standard, 2=lux
+            'šířka látky': item.lamellaSize || '127',
+            'ks': item.quantity,
+            'šířka': item.width,
+            'výška': item.height,
+            'typ stahování': item.verticalStahovani || '1',
+            'počet barev': item.verticalColorsCount || 1,
+            'barva': item.lamellaColor,
+            'uchycení': item.mountingType || '',
+            'uchycení navíc (ks)': item.verticalExtraBrackets || 0,
+            'délka ovládání': item.verticalControlLength || '',
+            'bezpečn. prvek': item.safetyElementBlinds ? 'ANO' : 'NE',
+            'poznámky': item.notes || ''
+          }));
+        } else if (cat === 'ROLETKY') {
+          sheetName = 'Textilní roletky';
+          data = catItems.map((item, idx) => ({
+            'pozice': item.notes && item.notes.startsWith('Pozice:') ? item.notes.split(' | ')[0].replace('Pozice: ', '') : `Položka ${idx + 1}`,
+            'ks': item.quantity,
+            'typ roletky': getProductTypeLabel(item.productType),
+            'látka': item.lamellaColor,
+            'barva komponentů': item.boxColor || item.topProfileColor || '',
+            'šířka': item.width,
+            'výška': item.height,
+            'strana': item.controlSide,
+            'ovládání': item.motorBrand ? 'Motor' : 'Ř - řetízek',
+            'elektronika': item.motorBrand || '',
+            'vodicí lišta': item.guideRailsOption ? 'ANO' : 'NE',
+            'bezpečnost. prvek': item.safetyElement ? 'ANO' : 'NE',
+            'délka řetízku': item.chainLength || 'standard',
+            'poznámky': item.notes || ''
+          }));
+        } else if (cat === 'SCREENS') {
+          sheetName = 'Sítě proti hmyzu';
+          data = catItems.map((item, idx) => ({
+            'pozice': item.notes && item.notes.startsWith('Pozice:') ? item.notes.split(' | ')[0].replace('Pozice: ', '') : `Položka ${idx + 1}`,
+            'profil': item.productType || '',
+            'ks': item.quantity,
+            'šířka': item.width,
+            'výška': item.height,
+            'barva profilu': item.topProfileColor || item.boxColor || '',
+            'síťovina': item.lamellaColor,
+            'okopový plech': item.kickPlate ? 'ANO' : 'NE',
+            'typ kartáčku / těsnění': item.brushType || '',
+            'samozavírací panty (ks)': item.pantsCountSelfClose ? 1 : 0,
+            'standardní panty (ks)': item.pantsCountStandard || 0,
+            'výška držáku / uchycení do okna': item.mountingType || '',
+            'rohy sítě (vnitřní/vnější)': item.cornersLook || '',
+            'magnet / úchyty': item.handleMagnet ? 'ANO' : 'NE',
+            'poznámka': item.notes || ''
+          }));
+        } else if (cat === 'EXTERNAL') {
+          sheetName = 'Venkovní žaluzie';
+          data = catItems.map((item, idx) => ({
+            'pozice': item.notes && item.notes.startsWith('Pozice:') ? item.notes.split(' | ')[0].replace('Pozice: ', '') : `Položka ${idx + 1}`,
+            'ks': item.quantity,
+            'šířka': item.width,
+            'výška': item.height,
+            'typ lamely': item.lamellaSize,
+            'barva lamela': item.lamellaColor,
+            'prodloužení profilu +/- (mm)': '',
+            'vedení žaluzie levá (typ)': item.guideType || '',
+            'vedení žaluzie levá (barva)': item.boxColor || '',
+            'vedení žaluzie pravá (typ)': item.guideType || '',
+            'vedení žaluzie pravá (barva)': item.boxColor || '',
+            'konc. lišta (barva)': item.endProfileColor || '',
+            'uchycení vedení levá (typ)': item.mountingType || '',
+            'uchycení vedení levá (barva)': '',
+            'uchycení vedení pravá (typ)': item.mountingType || '',
+            'uchycení vedení pravá (barva)': '',
+            'držák nosníku (typ)': item.mountingSupport ? 'ANO' : '',
+            'způsob ovládání (L/P/S)': item.controlSide,
+            'způsob ovládání (typ)': item.motorBrand || 'Klika',
+            'specifikace': item.electronicsReceiver || '',
+            'spojeno s pozicí': '',
+            'poznámka': item.notes || ''
+          }));
+        } else if (cat === 'AWNING') {
+          sheetName = 'Markýzy';
+          data = catItems.map((item, idx) => ({
+            'Pozice (Řádek)': idx + 1,
+            'Místnost / Pozice': item.notes && item.notes.startsWith('Pozice:') ? item.notes.split(' | ')[0].replace('Pozice: ', '') : `Položka ${idx + 1}`,
+            'Typ markýzy': getProductTypeLabel(item.productType),
+            'Šířka (mm)': item.width,
+            'Výsuv (mm)': item.height,
+            'Množství (ks)': item.quantity,
+            'Kvalita a kód tkaniny': item.lamellaColor,
+            'Typ konstrukce': item.boxType || '',
+            'Barva konstrukce': item.boxColor || '',
+            'Ovládání': item.controlSide,
+            'Větrné čidlo': item.awningWindSensor ? 'ANO' : 'NE',
+            'Přijímač/Ovladač': item.electronicsReceiver || '',
+            'Kryt Al/Stříška': item.awningHood ? 'ANO' : 'NE',
+            'Poznámka': item.notes || ''
+          }));
+        } else if (cat === 'PLISSE') {
+          sheetName = 'Plisé žaluzie';
+          data = catItems.map((item, idx) => ({
+            'pozice': item.notes && item.notes.startsWith('Pozice:') ? item.notes.split(' | ')[0].replace('Pozice: ', '') : `Položka ${idx + 1}`,
+            'šířka': item.width,
+            'výška': item.height,
+            'model': item.plisseModel || getProductTypeLabel(item.productType),
+            'barva profilu': item.boxColor || '',
+            'první látka (horní)': item.lamellaColor,
+            'druhá látka (dolní)': item.secondFabric || '',
+            'strana ovládání': item.controlSide,
+            'ovládání': item.controlSide, // Same logic or could be mapped to custom strings "madlo" etc.
+            'montáž                  - typ uchycení': item.mountingType || '',
+            'prodlužovací tyč (cm)': item.extensionRod || '',
+            'krycí lišta': item.plisseCoverBar || '',
+            'ks': item.quantity,
+            'poznámka': item.notes || ''
+          }));
+        } else if (cat === 'JAPANESE') {
+          sheetName = 'Japonské stěny';
+          data = catItems.map((item, idx) => ({
+            'Pozice (Řádek)': idx + 1,
+            'Místnost / Pozice': item.notes && item.notes.startsWith('Pozice:') ? item.notes.split(' | ')[0].replace('Pozice: ', '') : `Položka ${idx + 1}`,
+            'Profil VL': item.boxType || getProductTypeLabel(item.productType),
+            'Šířka (mm)': item.width,
+            'Výška (mm)': item.height,
+            'Množství (ks)': item.quantity,
+            'Šířka panelů (mm)': item.panelWidth || '',
+            'Počet panelů': item.panelCount || 1,
+            'VL typ': item.japTrackType || '',
+            'Barva VL profilu': item.boxColor || '',
+            'Magnetické úchyty (párů)': item.japMagnetsEnabled ? (item.japMagnetCount || 2) : 0,
+            'Tkanina / Barva': item.lamellaColor,
+            'Poznámka': item.notes || ''
+          }));
+        } else {
+          sheetName = 'Stínění QAPI';
+          data = catItems.map((item, idx) => ({
+            'Pozice (Řádek)': idx + 1,
+            'Rozměry': `${item.width} x ${item.height} mm`,
+            'Ks': item.quantity,
+            'Barva lamely': item.lamellaColor,
+            'Barva profilu': item.topProfileColor,
+            'Model': getProductTypeLabel(item.productType),
+            'Poznámka': item.notes || ''
+          }));
+        }
+
+        const worksheet = XLSX.utils.json_to_sheet(data);
+        XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+      });
+
+      XLSX.writeFile(workbook, `QAPI_${orderNumber || 'objednavka'}.xlsx`);
+      playSuccessChime();
+      setAppNotification({ message: `Soubor QAPI_${orderNumber || 'objednavka'}.xlsx byl úspěšně stažen s oddělenými listy pro jednotlivé kategorie výrobků.`, isError: false });
+    } catch (err: any) {
+      console.error(err);
+      playErrorHum();
+      setAppNotification({ message: 'Chyba při sestavování Excelu: ' + err.message, isError: true });
+    }
+  };
 
   // Duplicate an existing item
   const handleDuplicateItem = (index: number) => {
@@ -162,7 +540,7 @@ export default function App() {
   const handleViewSummary = () => {
     playTactileClick();
     setJustSavedItem(null);
-    setCurrentTab('form');
+    setViewMode('grid');
   };
 
   // Clear entire form data
@@ -173,6 +551,57 @@ export default function App() {
       setOrderNumber('OBJ-' + Math.floor(1000 + Math.random() * 9000));
       setGeneralNotes('');
       setSubmissionResult(null);
+      setImportedFileInfo('');
+    }
+  };
+
+  const [importedFileInfo, setImportedFileInfo] = useState<string>('');
+
+  const handleFileImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      playTactileClick();
+      // Dynamically import the parser utility
+      const { parseXlsOrderFile } = await import('./utils/xlsParser');
+      const result = await parseXlsOrderFile(file);
+
+      if (result.items && result.items.length > 0) {
+        // Append parsed items to items list
+        setItems(prev => [...prev, ...result.items]);
+        setImportedFileInfo(`${result.fileName} (${result.items.length} prvků)`);
+        
+        // Auto-populate customer & order metadata if found
+        if (result.orderInfo?.customerName) {
+          setCustomerName(result.orderInfo.customerName);
+        }
+        if (result.orderInfo?.orderNumber) {
+          setOrderNumber(result.orderInfo.orderNumber);
+        }
+
+        playSuccessChime();
+        setAppNotification({
+          message: `Úspěšně importováno ${result.items.length} prvků z "${result.fileName}".`,
+          isError: false
+        });
+      } else {
+        playErrorHum();
+        setAppNotification({
+          message: 'V souboru nebyly nalezeny žádné platné stínicí prvky.',
+          isError: true
+        });
+      }
+    } catch (err: any) {
+      console.error(err);
+      playErrorHum();
+      setAppNotification({
+        message: `Chyba při parsování Excel souboru: ${err?.message || 'nepodporovaný formát'}`,
+        isError: true
+      });
+    } finally {
+      // Clear value so the same file can be selected again
+      e.target.value = '';
     }
   };
 
@@ -319,31 +748,7 @@ export default function App() {
             </div>
           </div>
 
-          {/* Navigation with Segmented Controls & Sound Switcher */}
-          <div className="flex items-center gap-2 self-stretch sm:self-auto justify-between sm:justify-start">
-            <div className="flex bg-neutral-100 p-0.5 rounded-lg border border-neutral-250/30 w-full sm:w-auto">
-              <button
-                onClick={() => { setCurrentTab('form'); setSubmissionResult(null); }}
-                className={`flex-1 sm:flex-none px-3.5 py-1 text-[11px] font-bold rounded-md transition duration-150 cursor-pointer select-none ${
-                  currentTab === 'form'
-                    ? 'bg-white text-neutral-900 shadow-sm border border-neutral-200/40'
-                    : 'text-neutral-500 hover:text-neutral-800'
-                }`}
-              >
-                Sestavit objednávku
-              </button>
-              <button
-                onClick={() => setCurrentTab('specs')}
-                className={`flex-1 sm:flex-none px-3.5 py-1 text-[11px] font-bold rounded-md transition duration-150 cursor-pointer select-none ${
-                  currentTab === 'specs'
-                    ? 'bg-white text-neutral-900 shadow-sm border border-neutral-200/40'
-                    : 'text-neutral-500 hover:text-neutral-800'
-                }`}
-              >
-                Katalogy &amp; Výměry
-              </button>
-            </div>
-          </div>
+          {/* Removed Navigation Controls */}
         </div>
       </header>
 
@@ -425,24 +830,6 @@ export default function App() {
                 Nová čistá zakázka
               </button>
             </div>
-          </div>
-        ) : currentTab === 'specs' ? (
-          /* Technical catalog guides tab without clutter */
-          <div className="space-y-4">
-            <div className="bg-white rounded-2xl border border-neutral-200/50 p-5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
-                <h2 className="text-sm font-black text-neutral-900 uppercase tracking-tight">
-                  Oficiální katalogy a limity QAPI
-                </h2>
-                <p className="text-xs text-neutral-400">
-                  Přehled rozměrových řad pro horizontální, exteriérové žaluzie a markýzy pro technické ujednání.
-                </p>
-              </div>
-              <div className="px-2.5 py-1 rounded bg-[#F2F2F7] border border-neutral-200/60 text-neutral-600 font-mono text-[9px] font-bold select-none">
-                VERZE: Q2/2026
-              </div>
-            </div>
-            <BlindSpecsInfo />
           </div>
         ) : justSavedItem ? (
           /* Beautiful Cupertino Apple-style post-add confirmation view */
@@ -602,245 +989,357 @@ export default function App() {
 
               {/* Items Summary list layout ( Widgets container) */}
               <div className="space-y-3">
-                <div className="flex justify-between items-center px-1">
+                <div className="flex justify-between items-center px-1 flex-wrap gap-2">
                   <div className="flex items-center gap-2">
-                    <span className="h-5 min-w-5 px-1 rounded-full bg-black flex items-center justify-center text-[10px] font-mono font-bold text-white select-none">
+                    <span className="h-5 min-w-5 px-1 bg-black flex items-center justify-center text-[10px] font-mono font-bold text-white rounded-full select-none">
                       {items.length}
                     </span>
-                    <h3 className="text-xs font-black text-neutral-900 uppercase tracking-wide">Položky k nacenění a výrobě</h3>
+                    <h3 className="text-xs font-black text-neutral-900 uppercase tracking-wide font-sans">Položky k nacenění a výrobě</h3>
                   </div>
 
-                  <button
-                    onClick={() => {
-                      setWizardEditingItem(null);
-                      setIsWizardOpen(true);
-                    }}
-                    className="px-3.5 py-2 bg-black hover:bg-neutral-850 text-white font-bold text-xs rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer select-none active:scale-95"
-                  >
-                    <Plus className="w-3.5 h-3.5 text-white" />
-                    Konfigurovat prvek stínění
-                  </button>
+                  <div className="flex bg-[#F2F2F7] p-1 rounded-xl gap-0.5 select-none shrink-0 border border-neutral-250/20">
+                    <button
+                      type="button"
+                      onClick={() => { playTactileClick(); setViewMode('grid'); }}
+                      className={`px-3 py-1 text-[10px] font-black rounded-lg transition-all cursor-pointer ${
+                        viewMode === 'grid'
+                          ? 'bg-white text-black shadow-3xs'
+                          : 'text-neutral-500 hover:text-neutral-800'
+                      }`}
+                    >
+                      Rychlá tabulka (.xlsx)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { playTactileClick(); setViewMode('cards'); }}
+                      className={`px-3 py-1 text-[10px] font-black rounded-lg transition-all cursor-pointer ${
+                        viewMode === 'cards'
+                          ? 'bg-white text-black shadow-3xs'
+                          : 'text-neutral-500 hover:text-neutral-800'
+                      }`}
+                    >
+                      Karty / Detaily
+                    </button>
+                  </div>
+
+                  <div className="flex gap-2 flex-wrap sm:flex-nowrap">
+                    <label className="inline-flex items-center gap-1.5 px-3 py-2 bg-emerald-50 text-emerald-800 border border-emerald-250 cursor-pointer hover:bg-emerald-100 text-xs font-bold rounded-xl shadow-yxs transition active:scale-95 select-none hover:border-emerald-300">
+                      <Upload className="w-3.5 h-3.5 text-emerald-700" />
+                      <span>Excel Import</span>
+                      <input
+                        type="file"
+                        accept=".xls,.xlsx"
+                        className="hidden"
+                        onChange={handleFileImport}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setWizardEditingItem(null);
+                        setIsWizardOpen(true);
+                      }}
+                      className="px-3.5 py-2 bg-black hover:bg-neutral-850 text-white font-bold text-xs rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer select-none active:scale-95"
+                    >
+                      <Plus className="w-3.5 h-3.5 text-white" />
+                      Konfigurovat prvek
+                    </button>
+                  </div>
                 </div>
 
-                {items.length === 0 ? (
-                  /* Clean Minimalist iOS Blank Frame */
-                  <div className="bg-white rounded-2xl border border-neutral-200/50 p-8 text-center space-y-4">
-                    <div className="h-12 w-12 bg-[#F2F2F7] rounded-full flex items-center justify-center mx-auto text-lg select-none shadow-inner">
-                      📦
-                    </div>
-                    <div className="max-w-xs mx-auto space-y-1">
-                      <h4 className="text-xs font-black text-neutral-900 uppercase tracking-tight">Žádné stínicí prvky</h4>
-                      <p className="text-[11px] text-neutral-400 leading-normal font-medium">
-                        Klikněte na tlačítko níže pro otevření interaktivního lamelového dotazníku QAPI.
-                      </p>
-                    </div>
-
-                    <div className="flex flex-col sm:flex-row gap-2 justify-center pt-2">
-                      <button
-                        onClick={() => {
-                          setWizardEditingItem(null);
-                          setIsWizardOpen(true);
-                        }}
-                        className="px-4 py-2.5 bg-black hover:bg-neutral-900 text-white font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer shadow-xs active:scale-95 select-none"
-                      >
-                        <Plus className="w-4 h-4 text-white" />
-                        Spustit dotazník QAPI
-                      </button>
-                      <button
-                        onClick={() => setCurrentTab('specs')}
-                        className="px-4 py-2.5 bg-neutral-100 hover:bg-neutral-100/85 text-neutral-700 font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer select-none active:scale-95 border border-neutral-200/40"
-                      >
-                        Rozměrové tabulky
-                      </button>
-                    </div>
-                  </div>
+                {viewMode === 'grid' ? (
+                  <ExcelGridEditor
+                    items={items}
+                    setItems={setItems}
+                    viewMode={viewMode}
+                    setViewMode={setViewMode}
+                    onExport={handleExportToExcel}
+                    onAddRow={handleGridAddRow}
+                    onDuplicate={handleDuplicateItem}
+                    onDelete={handleDeleteItem}
+                    onEdit={(idx) => {
+                      playTactileClick();
+                      setWizardEditingItem(items[idx]);
+                      setIsWizardOpen(true);
+                    }}
+                    validateItem={validateBlindItem}
+                    getProductTypeLabel={getProductTypeLabel}
+                    categoriesList={CATEGORIES_LIST}
+                    productTypesByCategory={PRODUCT_TYPES_BY_CATEGORY}
+                    controlOptionsByCategory={CONTROL_OPTIONS_BY_CATEGORY}
+                    lamellaOptionsByCategory={LAMELLA_OPTIONS_BY_CATEGORY}
+                    offlineTemplates={OFFLINE_TEMPLATES}
+                    importedFileInfo={importedFileInfo}
+                    setImportedFileInfo={setImportedFileInfo}
+                  />
                 ) : (
-                  /* Cards listing for current elements built with iOS detail standards */
-                  <div className="space-y-3">
-                    {items.map((item, index) => {
-                      const itemPrice = calculateItemPrice(item);
-                      const itemWeight = calculateItemWeight(item);
-                      const itemAlerts = validateBlindItem(item);
-                      const hasItemError = itemAlerts.some(al => al.type === 'error');
-
-                      return (
-                        <div
-                          key={item.id}
-                          className="bg-white rounded-2xl border border-neutral-200/60 p-4.5 shadow-xs hover:border-neutral-350 transition-all relative flex flex-col md:flex-row justify-between gap-4 group"
-                        >
-                          {/* Row numeric index in circle */}
-                          <div className="absolute top-4 left-4 h-5.5 w-5.5 rounded-full bg-neutral-100 border border-neutral-200/60 flex items-center justify-center text-[9px] font-mono font-bold text-neutral-500 select-none">
-                            {index + 1}
+                  /* ORIGINAL CARD VIEW (iOS standard Cards list) */
+                  items.length === 0 ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="bg-white rounded-2xl border border-neutral-200/50 p-6 text-center space-y-4 flex flex-col justify-between">
+                        <div className="space-y-4">
+                          <div className="h-10 w-10 bg-[#F2F2F7] rounded-full flex items-center justify-center mx-auto text-base select-none shadow-inner">
+                            📦
                           </div>
+                          <div className="max-w-xs mx-auto space-y-1">
+                            <h4 className="text-xs font-black text-neutral-900 uppercase tracking-tight">Ruční zaměření prvků</h4>
+                            <p className="text-[11px] text-neutral-400 leading-normal font-medium">
+                              Klikněte na tlačítko níže pro otevření interaktivního lamelového dotazníku QAPI a nakonfigurujte rozměry prvku krok za krokem.
+                            </p>
+                          </div>
+                        </div>
 
-                          <div className="pl-8 space-y-2 flex-1">
-                            <div>
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className={`p-0.5 px-1.5 text-[8px] font-black rounded uppercase tracking-wider leading-none select-none ${
-                                  item.category === 'EXTERNAL'
-                                    ? 'bg-orange-100 border border-orange-200/65 text-orange-800'
-                                    : item.category === 'AWNING'
-                                    ? 'bg-neutral-900 text-white border border-transparent'
-                                    : item.category === 'WOODEN'
-                                    ? 'bg-amber-100 border border-amber-200/65 text-amber-800'
-                                    : item.category === 'VERTICAL'
-                                    ? 'bg-teal-100 border border-teal-200/65 text-teal-800'
-                                    : item.category === 'ROLETKY'
-                                    ? 'bg-indigo-100 border border-indigo-200/65 text-indigo-805'
-                                    : item.category === 'SCREENS'
-                                    ? 'bg-emerald-100 border border-emerald-200/65 text-emerald-805'
-                                    : 'bg-neutral-100 border border-neutral-200/60 text-neutral-700'
-                                }`}>
-                                  {item.category === 'EXTERNAL' ? 'Venkovní' : 
-                                   item.category === 'AWNING' ? 'Markýza' : 
-                                   item.category === 'WOODEN' ? 'Dřevěné' : 
-                                   item.category === 'VERTICAL' ? 'Vertikální' : 
-                                   item.category === 'ROLETKY' ? 'Roletka' : 
-                                   item.category === 'SCREENS' ? 'Síť/Dveře' : 
-                                   'Horizontální'}
-                                </span>
-                                <h4 className="text-xs font-black text-neutral-900 font-sans">
-                                  {getProductTypeLabel(item.productType)}
-                                </h4>
-                                {item.notes && (
-                                  <span className="text-[10px] text-neutral-400 font-bold bg-neutral-50 px-1.5 py-0.5 rounded border border-neutral-100">
-                                    {item.notes}
+                        <div className="flex flex-col sm:flex-row gap-2 justify-center pt-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setWizardEditingItem(null);
+                              setIsWizardOpen(true);
+                            }}
+                            className="px-4 py-2.5 bg-black hover:bg-neutral-900 text-white font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer shadow-xs active:scale-95 select-none"
+                          >
+                            <Plus className="w-4 h-4 text-white" />
+                            Spustit dotazník QAPI
+                          </button>
+
+                        </div>
+                      </div>
+
+                      {/* Drag and Drop / Excel Import widget */}
+                      <div className="bg-emerald-50/15 rounded-2xl border border-dashed border-emerald-350 p-6 text-center space-y-4 flex flex-col justify-between hover:bg-emerald-50/30 transition-all duration-150">
+                        <div className="space-y-4">
+                          <div className="h-10 w-10 bg-emerald-100 text-emerald-800 rounded-full flex items-center justify-center mx-auto text-base select-none shadow-inner">
+                            📊
+                          </div>
+                          <div className="max-w-xs mx-auto space-y-1">
+                            <h4 className="text-xs font-black text-emerald-920 uppercase tracking-tight">Rychlý import z Excelu (.xls)</h4>
+                            <p className="text-[11px] text-emerald-605 leading-normal font-semibold">
+                              Máte již vyplněnou tabulku ze složky <code className="font-mono bg-emerald-100/60 px-1 py-0.5 rounded text-[10px]">xls</code>? Nahrajte ji sem! Začněte s „01_ Horizontální žaluzie“.
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="pt-2">
+                          <label className="inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs rounded-xl transition cursor-pointer shadow-xs active:scale-95 select-none w-full sm:w-auto justify-center">
+                            <Upload className="w-4 h-4" />
+                            Vybrat .xls formulář
+                            <input
+                              type="file"
+                              accept=".xls,.xlsx"
+                              className="hidden"
+                              onChange={handleFileImport}
+                            />
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    /* Cards listing for current elements built with iOS detail standards */
+                    <div className="space-y-3">
+                      {importedFileInfo && (
+                        <div className="bg-emerald-50/80 rounded-xl border border-emerald-200/50 p-2 text-xs text-emerald-800 font-bold flex items-center justify-between gap-3 px-3 shadow-3xs">
+                          <div className="flex items-center gap-2">
+                            <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                            <span className="opacity-80">Importováno z tabulky:</span>
+                            <span className="bg-emerald-100/70 border border-emerald-300 px-1.5 py-0.5 rounded text-[10px] font-mono leading-none font-black text-emerald-900 truncate max-w-[180px] sm:max-w-xs">{importedFileInfo}</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setImportedFileInfo('')}
+                            className="text-[10px] text-emerald-600 hover:text-emerald-800 font-black cursor-pointer uppercase tracking-tight"
+                          >
+                            Skrýt
+                          </button>
+                        </div>
+                      )}
+                      {items.map((item, index) => {
+                        const itemPrice = calculateItemPrice(item);
+                        const itemWeight = calculateItemWeight(item);
+                        const itemAlerts = validateBlindItem(item);
+                        const hasItemError = itemAlerts.some(al => al.type === 'error');
+
+                        return (
+                          <div
+                            key={item.id}
+                            className="bg-white rounded-2xl border border-neutral-200/60 p-4.5 shadow-xs hover:border-neutral-350 transition-all relative flex flex-col md:flex-row justify-between gap-4 group"
+                          >
+                            {/* Row numeric index in circle */}
+                            <div className="absolute top-4 left-4 h-5.5 w-5.5 rounded-full bg-neutral-100 border border-neutral-200/60 flex items-center justify-center text-[9px] font-mono font-bold text-neutral-500 select-none">
+                              {index + 1}
+                            </div>
+
+                            <div className="pl-8 space-y-2 flex-1">
+                              <div>
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className={`p-0.5 px-1.5 text-[8px] font-black rounded uppercase tracking-wider leading-none select-none ${
+                                    item.category === 'EXTERNAL'
+                                      ? 'bg-orange-100 border border-orange-200/65 text-orange-800'
+                                      : item.category === 'AWNING'
+                                      ? 'bg-neutral-900 text-white border border-transparent'
+                                      : item.category === 'WOODEN'
+                                      ? 'bg-amber-100 border border-amber-200/65 text-amber-800'
+                                      : item.category === 'VERTICAL'
+                                      ? 'bg-teal-100 border border-teal-200/65 text-teal-800'
+                                      : item.category === 'ROLETKY'
+                                      ? 'bg-indigo-100 border border-indigo-200/65 text-indigo-855'
+                                      : item.category === 'SCREENS'
+                                      ? 'bg-emerald-100 border border-emerald-200/65 text-emerald-855'
+                                      : 'bg-neutral-100 border border-neutral-200/60 text-neutral-700'
+                                  }`}>
+                                    {item.category === 'EXTERNAL' ? 'Venkovní' : 
+                                     item.category === 'AWNING' ? 'Markýza' : 
+                                     item.category === 'WOODEN' ? 'Dřevěné' : 
+                                     item.category === 'VERTICAL' ? 'Vertikální' : 
+                                     item.category === 'ROLETKY' ? 'Roletka' : 
+                                     item.category === 'SCREENS' ? 'Síť/Dveře' : 
+                                     'Horizontální'}
                                   </span>
+                                  <h4 className="text-xs font-black text-neutral-900 font-sans">
+                                    {getProductTypeLabel(item.productType)}
+                                  </h4>
+                                  {item.notes && (
+                                    <span className="text-[10px] text-neutral-400 font-bold bg-neutral-50 px-1.5 py-0.5 rounded border border-neutral-100">
+                                      {item.notes}
+                                    </span>
+                                  )}
+                                </div>
+
+                                {/* Highlight key details in Cupertino table capsules */}
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 mt-3 text-[11px] leading-tight select-none">
+                                  <div className="p-2 bg-[#F2F2F7] rounded-lg">
+                                    <span className="text-neutral-400 block text-[8px] font-bold tracking-wider mb-0.5">ROZMĚRY:</span>
+                                    <span className="font-mono font-bold text-neutral-800">{item.width} × {item.height} mm</span>
+                                  </div>
+                                  <div className="p-2 bg-[#F2F2F7] rounded-lg">
+                                    <span className="text-neutral-400 block text-[8px] font-bold tracking-wider mb-0.5">POČET KS:</span>
+                                    <span className="font-bold text-neutral-800">{item.quantity} ks</span>
+                                  </div>
+                                  <div className="p-2 bg-[#F2F2F7] rounded-lg text-ellipsis overflow-hidden">
+                                    <span className="text-neutral-400 block text-[8px] font-bold tracking-wider mb-0.5">LAMELA / TKANINA:</span>
+                                    <span className="font-semibold text-neutral-800 truncate block">{item.lamellaSize || 'Standard'}</span>
+                                  </div>
+                                  <div className="p-2 bg-[#F2F2F7] rounded-lg text-ellipsis overflow-hidden">
+                                    <span className="text-neutral-400 block text-[8px] font-bold tracking-wider mb-0.5">ODSTÍNY (L/P):</span>
+                                    <span className="font-semibold text-neutral-800 truncate block">{item.lamellaColor} / pr. {item.topProfileColor}</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Accessory summary badges in clean pills */}
+                              <div className="flex gap-1 flex-wrap text-[9px] font-bold text-neutral-500 select-none">
+                                {item.controlSide && (
+                                  <span className="px-1.5 py-0.5 bg-neutral-50 border border-neutral-150 rounded-md font-mono">Ovládání: {item.controlSide}</span>
+                                )}
+                                {item.isCelostin && <span className="px-1.5 py-0.5 bg-neutral-100 border border-neutral-200/40 text-neutral-800 rounded-md">Celostín</span>}
+                                {item.isSlant && <span className="px-1.5 py-0.5 bg-[#FFF9E6] border border-[#FFEBAD] text-amber-800 rounded-md">Atypické okno</span>}
+                                {item.hasGearbox && <span className="px-1.5 py-0.5 bg-neutral-50 border border-neutral-150 text-neutral-700 rounded-md">S planetovou převodovkou</span>}
+                                {item.awningWindSensor && <span className="px-1.5 py-0.5 bg-neutral-50 border border-neutral-150 text-neutral-700 rounded-md">Otřesové větrné čidlo</span>}
+                              </div>
+
+                              {/* Custom warning bubbles */}
+                              {itemAlerts.length > 0 && (
+                                <div className="space-y-1">
+                                  {itemAlerts.map((al, idx) => (
+                                    <div
+                                      key={idx}
+                                      className={`p-2 rounded-lg text-[10px] leading-normal flex items-start gap-1.5 border font-semibold ${
+                                        al.type === 'error'
+                                          ? 'bg-red-50 text-red-700 border-red-150/60'
+                                          : 'bg-amber-50 text-amber-800 border-amber-150/60'
+                                      }`}
+                                    >
+                                      <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                                      <span>{item.notes && item.notes.startsWith('Pozice:') ? `${item.notes.split(' | ')[0]}: ${al.message}` : al.message}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Side pricing columns with clean haptic action triggers */}
+                            <div className="flex flex-row md:flex-col justify-between items-end border-t md:border-t-0 md:border-l border-neutral-150/60 pt-3 md:pt-0 md:pl-4 shrink-0 min-w-40 text-right gap-2 select-none">
+                              <div>
+                                <span className="block text-[8px] text-neutral-400 font-bold tracking-wider">PLOCHA PRVKU (M²):</span>
+                                <span className="text-sm font-black font-mono text-neutral-905 block leading-none mt-0.5">
+                                  {((item.width * item.height) / 1000000).toFixed(3)} m²
+                                </span>
+                                {item.quantity > 1 ? (
+                                  <span className="block text-[9px] text-indigo-600 font-bold font-mono">Celkem: {((item.width * item.height * item.quantity) / 1000000).toFixed(3)} m² (~ {itemWeight} kg)</span>
+                                ) : (
+                                  <span className="block text-[9px] text-neutral-400 font-medium font-mono">~ {itemWeight} kg</span>
                                 )}
                               </div>
 
-                              {/* Highlight key details in Cupertino table capsules */}
-                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 mt-3 text-[11px] leading-tight select-none">
-                                <div className="p-2 bg-[#F2F2F7] rounded-lg">
-                                  <span className="text-neutral-400 block text-[8px] font-bold tracking-wider mb-0.5">ROZMĚRY:</span>
-                                  <span className="font-mono font-bold text-neutral-800">{item.width} × {item.height} mm</span>
-                                </div>
-                                <div className="p-2 bg-[#F2F2F7] rounded-lg">
-                                  <span className="text-neutral-400 block text-[8px] font-bold tracking-wider mb-0.5">POČET KS:</span>
-                                  <span className="font-bold text-neutral-800">{item.quantity} ks</span>
-                                </div>
-                                <div className="p-2 bg-[#F2F2F7] rounded-lg text-ellipsis overflow-hidden">
-                                  <span className="text-neutral-400 block text-[8px] font-bold tracking-wider mb-0.5">LAMELA / TKANINA:</span>
-                                  <span className="font-semibold text-neutral-800 truncate block">{item.lamellaSize || 'Standard'}</span>
-                                </div>
-                                <div className="p-2 bg-[#F2F2F7] rounded-lg text-ellipsis overflow-hidden">
-                                  <span className="text-neutral-400 block text-[8px] font-bold tracking-wider mb-0.5">ODSTÍNY (L/P):</span>
-                                  <span className="font-semibold text-neutral-800 truncate block">{item.lamellaColor} / pr. {item.topProfileColor}</span>
-                                </div>
+                              <div className="flex gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleDuplicateItem(index)}
+                                  className="p-1.5 bg-neutral-50 border border-neutral-200 hover:bg-neutral-100 text-neutral-500 rounded-lg transition-all cursor-pointer h-7 w-7 flex items-center justify-center border border-neutral-200/70"
+                                  title="Duplikovat žaluzii"
+                                >
+                                  <Copy className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleStartEditItem(item)}
+                                  className="px-2.5 py-1 bg-neutral-50 border border-neutral-200 hover:border-black hover:bg-white text-neutral-800 font-bold text-[10px] rounded-lg transition-all cursor-pointer border border-neutral-200/70"
+                                >
+                                  Upravit
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteItem(index)}
+                                  className="p-1.5 bg-neutral-50 border border-neutral-200 hover:bg-red-50 hover:text-red-650 hover:border-red-200 text-neutral-400 rounded-lg transition-all cursor-pointer h-7 w-7 flex items-center justify-center border border-neutral-200/70"
+                                  title="Odstranit"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
                               </div>
                             </div>
-
-                            {/* Accessory summary badges in clean pills */}
-                            <div className="flex gap-1 flex-wrap text-[9px] font-bold text-neutral-500 select-none">
-                              {item.controlSide && (
-                                <span className="px-1.5 py-0.5 bg-neutral-50 border border-neutral-150 rounded-md font-mono">Ovládání: {item.controlSide}</span>
-                              )}
-                              {item.isCelostin && <span className="px-1.5 py-0.5 bg-neutral-100 border border-neutral-200/40 text-neutral-800 rounded-md">Celostín</span>}
-                              {item.isSlant && <span className="px-1.5 py-0.5 bg-[#FFF9E6] border border-[#FFEBAD] text-amber-800 rounded-md">Atipické okno</span>}
-                              {item.hasGearbox && <span className="px-1.5 py-0.5 bg-neutral-50 border border-neutral-150 text-neutral-700 rounded-md">S planetovou převodovkou</span>}
-                              {item.awningWindSensor && <span className="px-1.5 py-0.5 bg-neutral-50 border border-neutral-150 text-neutral-700 rounded-md">Otřesové větrné čidlo</span>}
-                            </div>
-
-                            {/* Custom warning bubbles */}
-                            {itemAlerts.length > 0 && (
-                              <div className="space-y-1">
-                                {itemAlerts.map((al, idx) => (
-                                  <div
-                                    key={idx}
-                                    className={`p-2 rounded-lg text-[10px] leading-normal flex items-start gap-1.5 border font-semibold ${
-                                      al.type === 'error'
-                                        ? 'bg-red-50 text-red-700 border-red-150/60'
-                                        : 'bg-amber-50 text-amber-800 border-amber-150/60'
-                                    }`}
-                                  >
-                                    <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                                    <span>{al.message}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
                           </div>
+                        );
+                      })}
 
-                          {/* Side pricing columns with clean haptic action triggers */}
-                          <div className="flex flex-row md:flex-col justify-between items-end border-t md:border-t-0 md:border-l border-neutral-150/60 pt-3 md:pt-0 md:pl-4 shrink-0 min-w-40 text-right gap-2 select-none">
-                            <div>
-                              <span className="block text-[8px] text-neutral-400 font-bold tracking-wider">PLOCHA PRVKU (M²):</span>
-                              <span className="text-sm font-black font-mono text-neutral-905 block leading-none mt-0.5">
-                                {((item.width * item.height) / 1000000).toFixed(3)} m²
-                              </span>
-                              {item.quantity > 1 ? (
-                                <span className="block text-[9px] text-indigo-600 font-bold font-mono">Celkem: {((item.width * item.height * item.quantity) / 1000000).toFixed(3)} m² (~ {itemWeight} kg)</span>
-                              ) : (
-                                <span className="block text-[9px] text-neutral-400 font-medium font-mono">~ {itemWeight} kg</span>
-                              )}
-                            </div>
-
-                            <div className="flex gap-1.5">
-                              <button
-                                onClick={() => handleDuplicateItem(index)}
-                                className="p-1.5 bg-neutral-50 border border-neutral-200 hover:bg-neutral-100 text-neutral-500 rounded-lg transition-all cursor-pointer h-7 w-7 flex items-center justify-center"
-                                title="Duplikovat žaluzii"
-                              >
-                                <Copy className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                onClick={() => handleStartEditItem(item)}
-                                className="px-2.5 py-1 bg-neutral-50 border border-neutral-200 hover:border-black text-neutral-800 font-bold text-[10px] rounded-lg transition-all cursor-pointer"
-                              >
-                                Upravit
-                              </button>
-                              <button
-                                onClick={() => handleDeleteItem(index)}
-                                className="p-1.5 bg-neutral-50 border border-neutral-200 hover:bg-red-50 hover:text-red-650 hover:border-red-200 text-neutral-400 rounded-lg transition-all cursor-pointer h-7 w-7 flex items-center justify-center"
-                                title="Odstranit"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
+                      {/* Grand totals of count and area right at the end of the form per user request */}
+                      <div className="bg-indigo-50 border border-indigo-150/80 rounded-2xl p-4 flex flex-col sm:flex-row justify-between items-center gap-4 my-2">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2.5 bg-indigo-600 rounded-xl text-white">
+                            <Layers className="w-5 h-5" />
                           </div>
-
+                          <div className="text-left">
+                            <h4 className="text-xs font-black text-indigo-950 uppercase tracking-wider">Celkové parametry měření</h4>
+                            <p className="text-[10px] text-indigo-500 font-semibold mt-0.5 leading-tight">Počet prvků a celková plocha stínění v protokolu</p>
+                          </div>
                         </div>
-                      );
-                    })}
-
-                    {/* Grand totals of count and area right at the end of the form per user request */}
-                    <div className="bg-indigo-50 border border-indigo-150/80 rounded-2xl p-4 flex flex-col sm:flex-row justify-between items-center gap-4 my-2">
-                      <div className="flex items-center gap-3">
-                        <div className="p-2.5 bg-indigo-600 rounded-xl text-white">
-                          <Layers className="w-5 h-5" />
-                        </div>
-                        <div className="text-left">
-                          <h4 className="text-xs font-black text-indigo-950 uppercase tracking-wider">Celkové parametry měření</h4>
-                          <p className="text-[10px] text-indigo-500 font-semibold mt-0.5 leading-tight">Počet prvků a celková plocha stínění v protokolu</p>
+                        <div className="flex gap-4 sm:gap-6 self-stretch sm:self-auto justify-around sm:justify-end">
+                          <div className="text-right pl-4 sm:pl-0">
+                            <span className="block text-[8px] text-indigo-500 font-bold uppercase tracking-widest">KUSŮ CELKEM</span>
+                            <span className="text-lg font-black text-indigo-950 font-mono leading-none mt-0.5 block">{aggregatedStats.count} ks</span>
+                            <span className="text-[9px] text-indigo-400 font-mono font-bold">z {items.length} pozic</span>
+                          </div>
+                          <div className="text-right border-l border-indigo-200/60 pl-4 sm:pl-6">
+                            <span className="block text-[8px] text-indigo-500 font-bold uppercase tracking-widest">CELKOVÁ PLOCHA</span>
+                            <span className="text-lg font-black text-indigo-950 font-mono leading-none mt-0.5 block">{aggregatedStats.area.toFixed(3)} m²</span>
+                            <span className="text-[9px] text-indigo-400 font-mono font-bold">~ {aggregatedStats.weight.toFixed(1)} kg</span>
+                          </div>
                         </div>
                       </div>
-                      <div className="flex gap-4 sm:gap-6 self-stretch sm:self-auto justify-around sm:justify-end">
-                        <div className="text-right pl-4 sm:pl-0">
-                          <span className="block text-[8px] text-indigo-500 font-bold uppercase tracking-widest">KUSŮ CELKEM</span>
-                          <span className="text-lg font-black text-indigo-950 font-mono leading-none mt-0.5 block">{aggregatedStats.count} ks</span>
-                          <span className="text-[9px] text-indigo-400 font-mono font-bold">z {items.length} pozic</span>
-                        </div>
-                        <div className="text-right border-l border-indigo-200/60 pl-4 sm:pl-6">
-                          <span className="block text-[8px] text-indigo-500 font-bold uppercase tracking-widest">CELKOVÁ PLOCHA</span>
-                          <span className="text-lg font-black text-indigo-950 font-mono leading-none mt-0.5 block">{aggregatedStats.area.toFixed(3)} m²</span>
-                          <span className="text-[9px] text-indigo-400 font-mono font-bold">~ {aggregatedStats.weight.toFixed(1)} kg</span>
-                        </div>
+
+                      <div className="flex py-1 justify-center">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setWizardEditingItem(null);
+                            setIsWizardOpen(true);
+                          }}
+                          className="px-4 py-2.5 border-2 border-dashed border-neutral-300 hover:border-black hover:bg-white text-neutral-600 font-bold text-xs rounded-xl transition flex items-center gap-1.5 w-full justify-center cursor-pointer select-none"
+                        >
+                          <Plus className="w-4 h-4 text-neutral-650" />
+                          Konfigurovat další stínění (Zaměřovací dotazník)
+                        </button>
                       </div>
                     </div>
-
-                    <div className="flex py-1 justify-center">
-                      <button
-                        onClick={() => {
-                          setWizardEditingItem(null);
-                          setIsWizardOpen(true);
-                        }}
-                        className="px-4 py-2.5 border-2 border-dashed border-neutral-300 hover:border-black hover:bg-white text-neutral-600 font-bold text-xs rounded-xl transition flex items-center gap-1.5 w-full justify-center cursor-pointer select-none"
-                      >
-                        <Plus className="w-4 h-4 text-neutral-650" />
-                        Konfigurovat další stínění (Zaměřovací dotazník)
-                      </button>
-                    </div>
-                  </div>
+                  )
                 )}
               </div>
             </div>

@@ -295,6 +295,9 @@ async function startServer() {
     }
   });
 
+  // Expose the raw xls templates folder so technicians can download templates directly
+  app.use("/xls", express.static(path.join(process.cwd(), "xls")));
+
   // Serve static application inside Vite in development / compiled build in production
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
